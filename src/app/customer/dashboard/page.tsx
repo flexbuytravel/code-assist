@@ -1,118 +1,84 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { firestore } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
+import { firestore } from "@/lib/firebase";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function CustomerDashboard() {
-  const [customer, setCustomer] = useState<any>(null);
-  const [timeLeft, setTimeLeft] = useState("");
+  const { user } = useAuth();
+  const [customerData, setCustomerData] = useState<any>(null);
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState(false);
-
-  const customerId = "CURRENT_CUSTOMER_ID"; // TODO: replace with logged-in customer ID from auth context
 
   useEffect(() => {
-    const fetchCustomer = async () => {
-      try {
-        const customerRef = doc(firestore, "customers", customerId);
-        const customerSnap = await getDoc(customerRef);
-        if (customerSnap.exists()) {
-          setCustomer(customerSnap.data());
+    if (!user) return;
+
+    const fetchData = async () => {
+      const ref = doc(firestore, "customers", user.uid);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const data = snap.data();
+        setCustomerData(data);
+
+        if (data.fullyPaid) {
+          // Full payment - no countdown
+          setTimeLeft(null);
+        } else if (data.expiresAt) {
+          const expiry = new Date(data.expiresAt).getTime();
+          setTimeLeft(Math.max(0, expiry - Date.now()));
         }
-      } catch (error) {
-        console.error("Error fetching customer data:", error);
-      } finally {
-        setLoading(false);
       }
+      setLoading(false);
     };
 
-    fetchCustomer();
-  }, [customerId]);
+    fetchData();
+  }, [user]);
 
-  // Countdown logic
+  // Countdown tick
   useEffect(() => {
-    if (!customer) return;
+    if (timeLeft === null) return;
 
-    const targetDate = new Date(customer.expiresAt);
-
-    const timer = setInterval(() => {
-      const now = new Date();
-      const diff = targetDate.getTime() - now.getTime();
-
-      if (diff <= 0) {
-        setTimeLeft("Expired");
-        clearInterval(timer);
-      } else {
-        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
-        const minutes = Math.floor((diff / (1000 * 60)) % 60);
-        const seconds = Math.floor((diff / 1000) % 60);
-        setTimeLeft(`${days}d ${hours}h ${minutes}m ${seconds}s`);
-      }
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev && prev > 1000) return prev - 1000;
+        return 0;
+      });
     }, 1000);
 
-    return () => clearInterval(timer);
-  }, [customer]);
+    return () => clearInterval(interval);
+  }, [timeLeft]);
 
-  const handlePayDeposit = async () => {
-    if (!customer?.packageId) return;
-    setProcessing(true);
+  if (loading) return <p>Loading dashboard...</p>;
 
-    try {
-      const res = await fetch("/api/stripe/create-checkout-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          packageId: customer.packageId,
-          customerId,
-        }),
-      });
+  if (!customerData) return <p>No customer data found.</p>;
 
-      const data = await res.json();
-
-      if (data.success && data.url) {
-        window.location.href = data.url; // redirect to Stripe
-      } else {
-        alert(data.message || "Error creating checkout session");
-      }
-    } catch (error) {
-      console.error("Error creating checkout session:", error);
-      alert("Payment failed to start.");
-    } finally {
-      setProcessing(false);
-    }
+  const formatTime = (ms: number) => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const days = Math.floor(totalSeconds / (3600 * 24));
+    const hours = Math.floor((totalSeconds % (3600 * 24)) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return `${days}d ${hours}h ${minutes}m ${seconds}s`;
   };
 
-  if (loading) {
-    return <p>Loading dashboard...</p>;
-  }
-
-  if (!customer) {
-    return <p>No customer data found.</p>;
-  }
-
   return (
-    <div>
-      <h1>Welcome, {customer.name}</h1>
-      <h2>Package ID: {customer.packageId}</h2>
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-4">Customer Dashboard</h1>
 
-      {customer.depositPaid ? (
-        <div>
-          <p>Your deposit is confirmed ✅</p>
-          <p>Time left until package expires: {timeLeft}</p>
+      {customerData.fullyPaid ? (
+        <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
+          ✅ Your package is fully paid. Thank you!
+        </div>
+      ) : customerData.depositPaid ? (
+        <div className="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded">
+          Deposit paid. Time remaining to complete purchase:{" "}
+          <strong>{timeLeft !== null ? formatTime(timeLeft) : "Loading..."}</strong>
         </div>
       ) : (
-        <div>
-          <p>Please pay your deposit within:</p>
-          <p>{timeLeft}</p>
-          <button
-            className="btn"
-            onClick={handlePayDeposit}
-            disabled={processing}
-          >
-            {processing ? "Processing..." : "Pay Deposit"}
-          </button>
+        <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded">
+          Please complete payment within:{" "}
+          <strong>{timeLeft !== null ? formatTime(timeLeft) : "Loading..."}</strong>
         </div>
       )}
     </div>

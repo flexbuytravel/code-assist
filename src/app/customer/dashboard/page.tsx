@@ -8,6 +8,7 @@ export default function CustomerDashboard() {
   const [customer, setCustomer] = useState<any>(null);
   const [timeLeft, setTimeLeft] = useState("");
   const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState(false);
 
   const customerId = "CURRENT_CUSTOMER_ID"; // TODO: replace with logged-in customer ID from auth context
 
@@ -33,9 +34,7 @@ export default function CustomerDashboard() {
   useEffect(() => {
     if (!customer) return;
 
-    const targetDate = customer.depositPaid
-      ? new Date(customer.expiresAt) // 6 months from deposit
-      : new Date(customer.expiresAt); // 48 hours from registration
+    const targetDate = new Date(customer.expiresAt);
 
     const timer = setInterval(() => {
       const now = new Date();
@@ -55,6 +54,35 @@ export default function CustomerDashboard() {
 
     return () => clearInterval(timer);
   }, [customer]);
+
+  const handlePayDeposit = async () => {
+    if (!customer?.packageId) return;
+    setProcessing(true);
+
+    try {
+      const res = await fetch("/api/stripe/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          packageId: customer.packageId,
+          customerId,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success && data.url) {
+        window.location.href = data.url; // redirect to Stripe
+      } else {
+        alert(data.message || "Error creating checkout session");
+      }
+    } catch (error) {
+      console.error("Error creating checkout session:", error);
+      alert("Payment failed to start.");
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   if (loading) {
     return <p>Loading dashboard...</p>;
@@ -78,12 +106,13 @@ export default function CustomerDashboard() {
         <div>
           <p>Please pay your deposit within:</p>
           <p>{timeLeft}</p>
-          <a
-            href={`/checkout?packageId=${customer.packageId}&customerId=${customerId}`}
+          <button
             className="btn"
+            onClick={handlePayDeposit}
+            disabled={processing}
           >
-            Pay Deposit
-          </a>
+            {processing ? "Processing..." : "Pay Deposit"}
+          </button>
         </div>
       )}
     </div>

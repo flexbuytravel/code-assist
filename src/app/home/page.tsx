@@ -1,86 +1,83 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getDoc, doc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import Image from "next/image";
+import { useState, useEffect } from "react";
 
-export default function ClaimPackagePage() {
+export default function HomePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [packageId, setPackageId] = useState(searchParams.get("packageId") || "");
-  const [referralId, setReferralId] = useState(searchParams.get("referralId") || "");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  // Get from referral link if present
+  const referralFromLink = searchParams.get("referralId") || "";
+  const packageFromLink = searchParams.get("packageId") || "";
 
-  const handleLoadPackage = async () => {
-    if (!packageId) {
-      setError("Package ID is required.");
+  // State for manual entry
+  const [packageId, setPackageId] = useState(packageFromLink);
+  const [referralId, setReferralId] = useState(referralFromLink);
+  const [error, setError] = useState("");
+
+  const lockedFields = Boolean(packageFromLink && referralFromLink);
+
+  // Optional: load theme/branding if coming from referral
+  useEffect(() => {
+    if (lockedFields) {
+      console.log(`Loaded referral link for package: ${packageFromLink}`);
+    }
+  }, [lockedFields, packageFromLink]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!packageId || !referralId) {
+      setError("Both Package ID and Referral ID are required.");
       return;
     }
-    setError("");
-    setLoading(true);
 
-    try {
-      const pkgRef = doc(db, "packages", packageId);
-      const pkgSnap = await getDoc(pkgRef);
-
-      if (!pkgSnap.exists()) {
-        setError("Package not found.");
-        return;
-      }
-
-      const pkgData = pkgSnap.data();
-      if (pkgData.claimedBy) {
-        setError("This package has already been claimed.");
-        return;
-      }
-
-      // Redirect to registration page with package & referral IDs
-      router.push(`/register-customer?packageId=${encodeURIComponent(packageId)}&referralId=${encodeURIComponent(referralId || "")}`);
-    } catch (err) {
-      console.error("Error loading package:", err);
-      setError("Error loading package details.");
-    } finally {
-      setLoading(false);
-    }
+    // Send them to registration with IDs in query params
+    router.push(
+      `/customer/register?packageId=${encodeURIComponent(packageId)}&referralId=${encodeURIComponent(referralId)}`
+    );
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
-      <Image src="/logo2.png" alt="FlexBuy Logo" width={150} height={150} className="mb-6" />
+    <div className="max-w-xl mx-auto p-6 bg-white rounded shadow">
+      <h1 className="text-3xl font-bold mb-4 text-center">Claim Your Package</h1>
+      <p className="text-gray-600 mb-6 text-center">
+        Enter your Package ID and Referral ID to begin registration.
+      </p>
 
-      <div className="bg-white shadow-lg rounded-lg p-6 w-full max-w-md">
-        <h1 className="text-2xl font-bold mb-4">Claim Your Package</h1>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block font-medium mb-1">Package ID</label>
+          <input
+            type="text"
+            value={packageId}
+            onChange={(e) => setPackageId(e.target.value)}
+            readOnly={lockedFields}
+            className={`border p-2 w-full ${lockedFields ? "bg-gray-100" : ""}`}
+          />
+        </div>
 
-        {error && <div className="bg-red-100 text-red-700 p-2 mb-4 rounded">{error}</div>}
+        <div>
+          <label className="block font-medium mb-1">Referral ID</label>
+          <input
+            type="text"
+            value={referralId}
+            onChange={(e) => setReferralId(e.target.value)}
+            readOnly={lockedFields}
+            className={`border p-2 w-full ${lockedFields ? "bg-gray-100" : ""}`}
+          />
+        </div>
 
-        <label className="block mb-2 font-medium">Package ID</label>
-        <input
-          type="text"
-          value={packageId}
-          onChange={(e) => setPackageId(e.target.value)}
-          className="border rounded p-2 w-full mb-4"
-        />
-
-        <label className="block mb-2 font-medium">Referral ID (Optional)</label>
-        <input
-          type="text"
-          value={referralId}
-          onChange={(e) => setReferralId(e.target.value)}
-          className="border rounded p-2 w-full mb-4"
-        />
+        {error && <p className="text-red-600">{error}</p>}
 
         <button
-          onClick={handleLoadPackage}
-          disabled={loading}
-          className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 w-full"
+          type="submit"
+          className="bg-blue-600 text-white px-4 py-2 rounded w-full"
         >
-          {loading ? "Loading..." : "Load Package"}
+          Load Package
         </button>
-      </div>
+      </form>
     </div>
   );
 }

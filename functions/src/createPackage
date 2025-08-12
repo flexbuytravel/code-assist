@@ -1,0 +1,37 @@
+import * as functions from "firebase-functions";
+import * as admin from "firebase-admin";
+import { v4 as uuidv4 } from "uuid";
+
+admin.initializeApp();
+const db = admin.firestore();
+
+/**
+ * Callable function for agents to create packages
+ */
+export const createPackage = functions.https.onCall(async (data, context) => {
+  if (context.auth?.token.role !== "agent") {
+    throw new functions.https.HttpsError("permission-denied", "Only agents can create packages.");
+  }
+
+  const companyId = context.auth.token.companyId;
+  const agentId = context.auth.uid;
+
+  if (!companyId || !agentId) {
+    throw new functions.https.HttpsError("failed-precondition", "Missing company or agent information in claims.");
+  }
+
+  const { name, description, price } = data;
+
+  if (!name || typeof name !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Package name is required.");
+  }
+
+  if (!price || typeof price !== "number" || price <= 0) {
+    throw new functions.https.HttpsError("invalid-argument", "Price must be a positive number.");
+  }
+
+  // Generate unique packageId
+  const packageId = uuidv4();
+
+  // Generate unique referralCode for this agent
+  const referralCode = `${agentId.substring(0, 5)}-${Math.random().toString(36).substring(2, 8

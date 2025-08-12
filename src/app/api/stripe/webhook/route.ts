@@ -1,72 +1,58 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { firestore } from "@/lib/firebase";
-import { doc, updateDoc, serverTimestamp, Timestamp } from "firebase/firestore";
+import { getFirestore } from "firebase-admin/firestore";
+import { stripeSecretKey, stripeWebhookSecret } from "@/lib/stripeConfig";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: "2023-10-16",
-});
+const stripe = new Stripe(stripeSecretKey, { apiVersion: "2024-04-10" });
+const db = getFirestore();
 
 export async function POST(req: Request) {
   const sig = req.headers.get("stripe-signature");
 
+  if (!sig) {
+    return NextResponse.json({ error: "Missing Stripe signature" }, { status: 400 });
+  }
+
   let event: Stripe.Event;
 
   try {
-    const body = await req.text();
-    event = stripe.webhooks.constructEvent(
-      body,
-      sig!,
-      process.env.STRIPE_WEBHOOK_SECRET as string
-    );
+    const rawBody = await req.text();
+    event = stripe.webhooks.constructEvent(rawBody, sig, stripeWebhookSecret);
   } catch (err: any) {
-    console.error("Webhook signature verification failed:", err.message);
-    return NextResponse.json({ error: "Webhook Error" }, { status: 400 });
+    console.error("Webhook signature error:", err.message);
+    return NextResponse.json({ error: "Webhook signature verification failed" }, { status: 400 });
   }
 
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object as Stripe.Checkout.Session;
+  try {
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as Stripe.Checkout.Session;
 
-    const customerId = session.metadata?.customerId;
-    const packageId = session.metadata?.packageId;
-    const paymentType = session.metadata?.paymentType;
-    const insurance = session.metadata?.insurance === "true";
+      const { packageId, customerId, depositOnly } = session.metadata || {};
 
-    if (!customerId || !packageId || !paymentType) {
-      console.error("Webhook missing metadata:", session.metadata);
-      return NextResponse.json({ received: true });
-    }
-
-    try {
-      const customerRef = doc(firestore, "customers", customerId);
-
-      if (paymentType === "deposit") {
-        // Deposit paid: extend expiry by 6 months
-        const sixMonthsLater = Timestamp.fromDate(
-          new Date(Date.now() + 6 * 30 * 24 * 60 * 60 * 1000)
-        );
-        await updateDoc(customerRef, {
-          depositPaid: true,
-          expiresAt: sixMonthsLater,
-          insurance,
-          lastPaymentAt: serverTimestamp(),
-        });
-      } else if (paymentType === "full") {
-        // Full payment: remove expiry
-        await updateDoc(customerRef, {
-          fullyPaid: true,
-          expiresAt: null,
-          insurance,
-          lastPaymentAt: serverTimestamp(),
-        });
+      if (!packageId || !customerId) {
+        console.warn("Missing metadata in Stripe session");
+        return NextResponse.json({ received: true });
       }
 
-      console.log(
-        `Payment processed for customer ${customerId}, type: ${paymentType}`
-      );
-    } catch (err) {
-      console.error("Error updating Firestore after payment:", err);
+      // Mark payment as completed in Firestore
+      const packageRef = db.collection("packages").doc(packageId);
+
+      await packageRef.update({
+        sold: true,
+        soldTo: customerId,
+        paymentStatus: depositOnly ? "deposit_paid" : "paid_in_full",
+        depositPaidAt: depositOnly ? new Date() : null,
+        fullyPaidAt: !depositOnly ? new Date() : null,
+        expiresAt: depositOnly
+          ? new Date(Date.now() + 180 * 24 * 60 * 60 * 1000) // 6 months for deposit
+          : null, // no expiration if fully paid
+      });
+
+      console.log(`Package ${packageId} updated for customer ${customerId}`);
     }
+  } catch (err: any) {
+    console.error("Error handling Stripe webhook:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });

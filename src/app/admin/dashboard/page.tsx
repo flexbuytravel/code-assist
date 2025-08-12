@@ -1,158 +1,119 @@
+"use client";
 
-'use client';
-
-import { useEffect, useState } from 'react';
-import { getAdminDashboardData, AdminDashboardData } from '@/lib/data';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Building, Package, Users, Trophy, DollarSign } from 'lucide-react';
-
-function StatCard({ title, value, icon, description }: { title: string; value: string | number; icon: React.ReactNode; description?: string }) {
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
-        {icon}
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
-        {description && <p className="text-xs text-muted-foreground">{description}</p>}
-      </CardContent>
-    </Card>
-  );
-}
-
-const DashboardSkeleton = () => (
-    <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2">
-        <Skeleton className="h-28 w-full" />
-        <Skeleton className="h-28 w-full" />
-      </div>
-       <div className="grid gap-6 md:grid-cols-2">
-          <Skeleton className="h-96" />
-          <Skeleton className="h-96" />
-      </div>
-      <Skeleton className="h-96 w-full" />
-    </div>
-)
+import { useEffect, useState } from "react";
+import { collection, getDocs, query, orderBy, limit } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import Link from "next/link";
 
 export default function AdminDashboardPage() {
-  const [data, setData] = useState<AdminDashboardData | null>(null);
+  const [companies, setCompanies] = useState<any[]>([]);
+  const [agents, setAgents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({ companies: 0, agents: 0 });
 
   useEffect(() => {
     const fetchData = async () => {
-      setLoading(true);
-      const result = await getAdminDashboardData();
-      setData(result);
-      setLoading(false);
+      try {
+        // Fetch latest companies
+        const companiesRef = collection(db, "companies");
+        const companiesSnap = await getDocs(query(companiesRef, orderBy("createdAt", "desc"), limit(5)));
+        const companyData = companiesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        setCompanies(companyData);
+
+        // Fetch latest agents
+        const agentsRef = collection(db, "agents");
+        const agentsSnap = await getDocs(query(agentsRef, orderBy("createdAt", "desc"), limit(5)));
+        const agentData = agentsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        setAgents(agentData);
+
+        // Stats
+        setStats({
+          companies: companiesSnap.size,
+          agents: agentsSnap.size
+        });
+      } catch (err) {
+        console.error("Error loading dashboard:", err);
+      } finally {
+        setLoading(false);
+      }
     };
 
     fetchData();
   }, []);
 
-  if (loading || !data) {
-    return <DashboardSkeleton />;
-  }
+  if (loading) return <div>Loading...</div>;
 
   return (
-    <div className="flex flex-col gap-6">
-        <div className="grid gap-4 md:grid-cols-2 md:gap-8 lg:grid-cols-2">
-            <StatCard title="Total Sales" value={data.totalSales.toLocaleString()} icon={<Package className="h-4 w-4 text-muted-foreground" />} description="Across all companies"/>
-            <StatCard title="Total Revenue" value={`$${data.totalRevenue.toLocaleString()}`} icon={<DollarSign className="h-4 w-4 text-muted-foreground" />} description="Across all companies"/>
-        </div>
+    <div className="space-y-6">
+      <h1 className="text-3xl font-bold">Admin Dashboard</h1>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-             <Card>
-                <CardHeader>
-                    <CardTitle>Top 5 Companies by Sales</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Company</TableHead>
-                                <TableHead className="text-right">Sales</TableHead>
-                                <TableHead className="text-right">Revenue</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {data.topCompanies.map(company => (
-                                <TableRow key={company.id}>
-                                    <TableCell className="font-medium">{company.name}</TableCell>
-                                    <TableCell className="text-right">{company.totalSales.toLocaleString()}</TableCell>
-                                    <TableCell className="text-right">${company.totalRevenue.toLocaleString()}</TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                </CardContent>
-            </Card>
-             <Card>
-                <CardHeader>
-                    <CardTitle>Top 5 Agents by Sales</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Agent</TableHead>
-                                <TableHead className="text-right">Sales</TableHead>
-                                <TableHead className="text-right">Revenue</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {data.topAgents.map((agent, index) => (
-                                <TableRow key={agent.id}>
-                                    <TableCell>
-                                        <div className="flex items-center gap-2">
-                                            {index < 3 && <Trophy className={`h-4 w-4 ${index === 0 ? 'text-yellow-500' : index === 1 ? 'text-gray-400' : 'text-yellow-700'}`} />}
-                                            <div>
-                                                <div className="font-medium">{agent.name}</div>
-                                                <div className="text-sm text-muted-foreground">{agent.companyName}</div>
-                                            </div>
-                                        </div>
-                                    </TableCell>
-                                    <TableCell className="text-right">{agent.totalSales.toLocaleString()}</TableCell>
-                                    <TableCell className="text-right">${agent.totalRevenue.toLocaleString()}</TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                </CardContent>
-            </Card>
+      {/* Quick Stats */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-white p-4 rounded shadow">
+          <p className="text-gray-500">Companies</p>
+          <p className="text-2xl font-bold">{stats.companies}</p>
         </div>
-        
-        <Card>
-            <CardHeader>
-                <CardTitle>All Companies</CardTitle>
-                <CardDescription>A complete list of all companies on the platform.</CardDescription>
-            </CardHeader>
-            <CardContent>
-                 <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Company</TableHead>
-                            <TableHead>Agents</TableHead>
-                            <TableHead className="text-right">Sales</TableHead>
-                            <TableHead className="text-right">Revenue</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {data.allCompanies.map((company) => (
-                            <TableRow key={company.id}>
-                                <TableCell className="font-medium">{company.name}</TableCell>
-                                <TableCell>{company.agents}</TableCell>
-                                <TableCell className="text-right">{company.totalSales.toLocaleString()}</TableCell>
-                                <TableCell className="text-right">${company.totalRevenue.toLocaleString()}</TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
-            </CardContent>
-        </Card>
+        <div className="bg-white p-4 rounded shadow">
+          <p className="text-gray-500">Agents</p>
+          <p className="text-2xl font-bold">{stats.agents}</p>
+        </div>
+      </div>
 
+      {/* Latest Companies */}
+      <div className="bg-white p-4 rounded shadow">
+        <div className="flex justify-between mb-2">
+          <h2 className="text-xl font-semibold">Latest Companies</h2>
+          <Link href="/admin/companies" className="text-blue-600 hover:underline">View All</Link>
+        </div>
+        {companies.length === 0 ? (
+          <p className="text-gray-500">No companies found.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="p-2">Name</th>
+                <th className="p-2">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {companies.map((company) => (
+                <tr key={company.id} className="border-b">
+                  <td className="p-2">{company.name}</td>
+                  <td className="p-2">{company.createdAt?.toDate?.().toLocaleDateString() || "N/A"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Latest Agents */}
+      <div className="bg-white p-4 rounded shadow">
+        <div className="flex justify-between mb-2">
+          <h2 className="text-xl font-semibold">Latest Agents</h2>
+          <Link href="/admin/agents" className="text-blue-600 hover:underline">View All</Link>
+        </div>
+        {agents.length === 0 ? (
+          <p className="text-gray-500">No agents found.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="p-2">Name</th>
+                <th className="p-2">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {agents.map((agent) => (
+                <tr key={agent.id} className="border-b">
+                  <td className="p-2">{agent.name}</td>
+                  <td className="p-2">{agent.createdAt?.toDate?.().toLocaleDateString() || "N/A"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }

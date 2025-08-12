@@ -1,89 +1,96 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { getAuth } from "firebase/auth";
+import { collection, addDoc, getDocs, query, where, doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { getFirestore, collection, addDoc } from "firebase/firestore";
-import { getRoleFromClaims, hasRole } from "@/lib/roles";
-import Sidebar from "@/components/layout/Sidebar";
 
 export default function CreatePackagePage() {
-  const auth = getAuth();
-  const db = getFirestore();
-  const router = useRouter();
-  const [name, setName] = useState("");
-  const [price, setPrice] = useState<number>(0);
+  const [title, setTitle] = useState("");
+  const [price, setPrice] = useState("");
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        router.push("/auth/login");
-        return;
-      }
-      const role = await getRoleFromClaims(currentUser);
-      if (!hasRole({ ...currentUser, role }, "agent")) {
-        router.push("/auth/login");
-      }
-    });
-    return () => unsub();
-  }, [auth, router]);
-
-  const handleCreatePackage = async (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser) return;
-    setLoading(true);
     try {
+      setLoading(true);
+      const auth = getAuth();
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error("Not authenticated");
+
+      // Get agent record for logged-in user
+      const userSnap = await getDocs(
+        query(collection(db, "users"), where("uid", "==", uid))
+      );
+      if (userSnap.empty) throw new Error("User not found");
+
+      const userData = userSnap.docs[0].data();
+      const agentId = userData.agentId;
+
+      // Get the full agent doc to pull companyId
+      const agentDocRef = doc(db, "agents", agentId);
+      const agentDocSnap = await getDoc(agentDocRef);
+      if (!agentDocSnap.exists()) throw new Error("Agent record not found");
+
+      const agentData = agentDocSnap.data();
+      const companyId = agentData.companyId;
+
+      // Create the package tied to this agent & company
       await addDoc(collection(db, "packages"), {
-        name,
-        price,
-        agentId: auth.currentUser.uid,
-        companyId: null, // Should be set in backend when package is linked
+        title,
+        price: parseFloat(price),
+        agentId,
+        companyId,
         createdAt: new Date(),
         claimed: false,
       });
+
+      alert("Package created successfully!");
       router.push("/agent/packages");
+
     } catch (err) {
-      console.error(err);
+      console.error("Error creating package:", err);
+      alert("Failed to create package. Check console for details.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex min-h-screen bg-gray-100">
-      <Sidebar />
-      <main className="flex-1 p-6">
-        <h1 className="text-2xl font-bold mb-4">Create Package</h1>
-        <form
-          onSubmit={handleCreatePackage}
-          className="space-y-4 max-w-md bg-white p-6 shadow rounded"
-        >
+    <div className="p-6 max-w-lg mx-auto">
+      <h1 className="text-2xl font-bold mb-6">Create New Package</h1>
+      <form onSubmit={handleCreate} className="space-y-4">
+        <div>
+          <label className="block mb-1">Package Title</label>
           <input
             type="text"
-            placeholder="Package Name"
-            className="w-full border p-2 rounded"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="border rounded w-full p-2"
             required
           />
+        </div>
+        <div>
+          <label className="block mb-1">Price</label>
           <input
             type="number"
-            placeholder="Price"
-            className="w-full border p-2 rounded"
             value={price}
-            onChange={(e) => setPrice(Number(e.target.value))}
+            onChange={(e) => setPrice(e.target.value)}
+            className="border rounded w-full p-2"
+            step="0.01"
             required
           />
-          <button
-            type="submit"
-            disabled={loading}
-            className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700"
-          >
-            {loading ? "Creating..." : "Create Package"}
-          </button>
-        </form>
-      </main>
+        </div>
+        <button
+          type="submit"
+          disabled={loading}
+          className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50"
+        >
+          {loading ? "Creating..." : "Create Package"}
+        </button>
+      </form>
     </div>
   );
 }

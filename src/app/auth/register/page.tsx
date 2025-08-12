@@ -2,197 +2,176 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createUserWithEmailAndPassword, getAuth } from "firebase/auth";
-import { getFirestore, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
-import { app } from "@/lib/firebase"; // Your Firebase client init
-
-const auth = getAuth(app);
-const db = getFirestore(app);
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
+import { validateEmail, validatePassword } from "@/lib/validation";
 
 export default function RegisterPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const packageIdFromLink = searchParams.get("packageId") || "";
+  const referralIdFromLink = searchParams.get("referralId") || "";
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     password: "",
+    confirmPassword: "",
     phone: "",
     address: "",
-    packageId: "",
-    referralCode: "",
+    packageId: packageIdFromLink,
+    referralId: referralIdFromLink,
   });
-  const [packageData, setPackageData] = useState<any>(null);
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
-  // Prefill and lock package/referral fields
-  useEffect(() => {
-    const pkg = searchParams.get("packageId");
-    const ref = searchParams.get("referralCode");
+  const validateForm = () => {
+    let newErrors: Record<string, string> = {};
 
-    if (pkg) {
-      setFormData((prev) => ({ ...prev, packageId: pkg }));
-      loadPackage(pkg, ref || "");
-    }
-    if (ref) {
-      setFormData((prev) => ({ ...prev, referralCode: ref }));
-    }
-  }, [searchParams]);
+    if (!formData.name.trim()) newErrors.name = "Name is required.";
+    if (!validateEmail(formData.email)) newErrors.email = "Invalid email format.";
+    if (!validatePassword(formData.password))
+      newErrors.password = "Password must be at least 8 characters, include an uppercase letter and a number.";
+    if (formData.password !== formData.confirmPassword)
+      newErrors.confirmPassword = "Passwords do not match.";
+    if (!/^\+?\d{10,15}$/.test(formData.phone))
+      newErrors.phone = "Phone must be 10–15 digits.";
+    if (!formData.address.trim()) newErrors.address = "Address is required.";
+    if (!formData.packageId.trim()) newErrors.packageId = "Package ID is required.";
+    if (!formData.referralId.trim()) newErrors.referralId = "Referral ID is required.";
 
-  const loadPackage = async (pkgId: string, refCode: string) => {
-    try {
-      const packageRef = doc(db, "packages", pkgId);
-      const snap = await getDoc(packageRef);
-      if (!snap.exists()) {
-        setError("Package not found.");
-        return;
-      }
-      const data = snap.data();
-      if (data.referralCode !== refCode) {
-        setError("Invalid referral code for this package.");
-        return;
-      }
-      setPackageData(data);
-    } catch (err) {
-      console.error(err);
-      setError("Error loading package details.");
-    }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleRegister = async () => {
-    setError("");
-
-    if (!formData.email || !formData.password || !formData.name) {
-      setError("Please fill in all required fields.");
-      return;
-    }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateForm()) return;
 
     setLoading(true);
     try {
-      // Create Firebase Auth account
-      const userCred = await createUserWithEmailAndPassword(
-        auth,
-        formData.email,
-        formData.password
-      );
-
-      // Save user document
+      const userCred = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
       await setDoc(doc(db, "users", userCred.user.uid), {
-        uid: userCred.user.uid,
         name: formData.name,
         email: formData.email,
         phone: formData.phone,
         address: formData.address,
         packageId: formData.packageId,
-        referralCode: formData.referralCode,
+        referralId: formData.referralId,
         role: "customer",
-        createdAt: serverTimestamp(),
+        createdAt: new Date(),
       });
 
-      // Optional: mark package as claimed
-      await setDoc(
-        doc(db, "packages", formData.packageId),
-        {
-          claimedBy: userCred.user.uid,
-          claimedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
       router.push("/customer/dashboard");
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Error registering user.");
+    } catch (error: any) {
+      setErrors({ general: error.message });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-lg mx-auto mt-12 p-6 bg-white shadow rounded">
+    <div className="max-w-md mx-auto p-6 bg-white rounded shadow">
       <h1 className="text-2xl font-bold mb-4">Register</h1>
+      {errors.general && <p className="text-red-500">{errors.general}</p>}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <input
+          type="text"
+          name="name"
+          placeholder="Full Name"
+          value={formData.name}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+        />
+        {errors.name && <p className="text-red-500">{errors.name}</p>}
 
-      {error && <p className="text-red-600 mb-4">{error}</p>}
+        <input
+          type="email"
+          name="email"
+          placeholder="Email Address"
+          value={formData.email}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+        />
+        {errors.email && <p className="text-red-500">{errors.email}</p>}
 
-      <label className="block mb-2 font-semibold">Name</label>
-      <input
-        name="name"
-        value={formData.name}
-        onChange={handleChange}
-        className="w-full border rounded px-3 py-2 mb-4"
-      />
+        <input
+          type="password"
+          name="password"
+          placeholder="Password"
+          value={formData.password}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+        />
+        {errors.password && <p className="text-red-500">{errors.password}</p>}
 
-      <label className="block mb-2 font-semibold">Email</label>
-      <input
-        name="email"
-        type="email"
-        value={formData.email}
-        onChange={handleChange}
-        className="w-full border rounded px-3 py-2 mb-4"
-      />
+        <input
+          type="password"
+          name="confirmPassword"
+          placeholder="Confirm Password"
+          value={formData.confirmPassword}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+        />
+        {errors.confirmPassword && <p className="text-red-500">{errors.confirmPassword}</p>}
 
-      <label className="block mb-2 font-semibold">Password</label>
-      <input
-        name="password"
-        type="password"
-        value={formData.password}
-        onChange={handleChange}
-        className="w-full border rounded px-3 py-2 mb-4"
-      />
+        <input
+          type="tel"
+          name="phone"
+          placeholder="Phone Number"
+          value={formData.phone}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+        />
+        {errors.phone && <p className="text-red-500">{errors.phone}</p>}
 
-      <label className="block mb-2 font-semibold">Phone Number</label>
-      <input
-        name="phone"
-        value={formData.phone}
-        onChange={handleChange}
-        className="w-full border rounded px-3 py-2 mb-4"
-      />
+        <input
+          type="text"
+          name="address"
+          placeholder="Address"
+          value={formData.address}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+        />
+        {errors.address && <p className="text-red-500">{errors.address}</p>}
 
-      <label className="block mb-2 font-semibold">Address</label>
-      <input
-        name="address"
-        value={formData.address}
-        onChange={handleChange}
-        className="w-full border rounded px-3 py-2 mb-4"
-      />
+        <input
+          type="text"
+          name="packageId"
+          placeholder="Package ID"
+          value={formData.packageId}
+          onChange={handleChange}
+          readOnly={!!packageIdFromLink}
+          className={`w-full p-2 border rounded ${packageIdFromLink ? "bg-gray-100" : ""}`}
+        />
+        {errors.packageId && <p className="text-red-500">{errors.packageId}</p>}
 
-      <label className="block mb-2 font-semibold">Package ID</label>
-      <input
-        name="packageId"
-        value={formData.packageId}
-        readOnly
-        className="w-full border rounded px-3 py-2 mb-4 bg-gray-100 text-gray-500"
-      />
+        <input
+          type="text"
+          name="referralId"
+          placeholder="Referral ID"
+          value={formData.referralId}
+          onChange={handleChange}
+          readOnly={!!referralIdFromLink}
+          className={`w-full p-2 border rounded ${referralIdFromLink ? "bg-gray-100" : ""}`}
+        />
+        {errors.referralId && <p className="text-red-500">{errors.referralId}</p>}
 
-      <label className="block mb-2 font-semibold">Referral Code</label>
-      <input
-        name="referralCode"
-        value={formData.referralCode}
-        readOnly
-        className="w-full border rounded px-3 py-2 mb-4 bg-gray-100 text-gray-500"
-      />
-
-      {packageData && (
-        <div className="border p-4 rounded mb-4">
-          <h2 className="text-lg font-semibold">{packageData.title}</h2>
-          <p>{packageData.description}</p>
-          <p className="font-bold">Price: ${packageData.price?.toFixed(2)}</p>
-        </div>
-      )}
-
-      <button
-        onClick={handleRegister}
-        disabled={loading}
-        className="w-full bg-green-600 text-white py-2 rounded hover:bg-green-700 disabled:opacity-50"
-      >
-        {loading ? "Registering..." : "Register"}
-      </button>
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+        >
+          {loading ? "Registering..." : "Register"}
+        </button>
+      </form>
     </div>
   );
 }

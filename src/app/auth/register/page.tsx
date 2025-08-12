@@ -43,10 +43,9 @@ export default function RegisterPage() {
       const userCred = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCred.user;
 
-      // Set displayName for convenience
       await updateProfile(user, { displayName: name });
 
-      // If claiming a package, fetch it
+      // Fetch package to link customer to company
       let companyId = null;
       if (packageId) {
         const pkgRef = doc(db, "packages", packageId);
@@ -59,14 +58,14 @@ export default function RegisterPage() {
         const pkgData = pkgSnap.data();
         companyId = pkgData.companyId || null;
 
-        // Attach claimTimestamp (48-hour timer start)
+        // Attach claimTimestamp to package
         await updateDoc(pkgRef, {
           claimedBy: user.uid,
           claimTimestamp: new Date().toISOString()
         });
       }
 
-      // Create customer record
+      // Create customer record with 48h default
       await setDoc(doc(db, "customers", user.uid), {
         name,
         email,
@@ -76,6 +75,9 @@ export default function RegisterPage() {
         referralId: referralId || null,
         companyId: companyId || null,
         deletedAgent: false,
+        depositPaid: false,
+        depositTimestamp: null,
+        claimTimestamp: new Date().toISOString(),
         createdAt: new Date().toISOString()
       });
 
@@ -93,65 +95,14 @@ export default function RegisterPage() {
       <h1>Register</h1>
       {error && <p style={{ color: "red" }}>{error}</p>}
       <form onSubmit={handleRegister}>
-        <input
-          type="text"
-          placeholder="Full Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
-
-        <input
-          type="email"
-          placeholder="Email Address"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-
-        <input
-          type="tel"
-          placeholder="Phone Number"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          required
-        />
-
-        <input
-          type="text"
-          placeholder="Address"
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          required
-        />
-
-        <input
-          type="text"
-          placeholder="Package ID"
-          value={packageId}
-          onChange={(e) => setPackageId(e.target.value)}
-          readOnly={!!searchParams.get("packageId")}
-        />
-
-        <input
-          type="text"
-          placeholder="Referral ID"
-          value={referralId}
-          onChange={(e) => setReferralId(e.target.value)}
-          readOnly={!!searchParams.get("referralId")}
-        />
-
-        <button type="submit" disabled={loading}>
-          {loading ? "Registering..." : "Register"}
-        </button>
+        <input type="text" placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} required />
+        <input type="email" placeholder="Email Address" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <input type="tel" placeholder="Phone Number" value={phone} onChange={(e) => setPhone(e.target.value)} required />
+        <input type="text" placeholder="Address" value={address} onChange={(e) => setAddress(e.target.value)} required />
+        <input type="text" placeholder="Package ID" value={packageId} onChange={(e) => setPackageId(e.target.value)} readOnly={!!searchParams.get("packageId")} />
+        <input type="text" placeholder="Referral ID" value={referralId} onChange={(e) => setReferralId(e.target.value)} readOnly={!!searchParams.get("referralId")} />
+        <button type="submit" disabled={loading}>{loading ? "Registering..." : "Register"}</button>
       </form>
     </div>
   );

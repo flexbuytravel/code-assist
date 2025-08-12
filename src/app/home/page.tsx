@@ -1,83 +1,82 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, useEffect } from "react";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, doc, getDoc } from "firebase/firestore";
+import Sidebar from "@/components/layout/Sidebar";
 
-export default function HomePage() {
+export default function ClaimPackagePage() {
+  const auth = getAuth();
+  const db = getFirestore();
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Get from referral link if present
-  const referralFromLink = searchParams.get("referralId") || "";
-  const packageFromLink = searchParams.get("packageId") || "";
+  const [packageId, setPackageId] = useState("");
+  const [referralId, setReferralId] = useState("");
+  const [pkgData, setPkgData] = useState<any>(null);
 
-  // State for manual entry
-  const [packageId, setPackageId] = useState(packageFromLink);
-  const [referralId, setReferralId] = useState(referralFromLink);
-  const [error, setError] = useState("");
-
-  const lockedFields = Boolean(packageFromLink && referralFromLink);
-
-  // Optional: load theme/branding if coming from referral
   useEffect(() => {
-    if (lockedFields) {
-      console.log(`Loaded referral link for package: ${packageFromLink}`);
+    const pkgParam = searchParams.get("packageId");
+    const refParam = searchParams.get("referralId");
+
+    if (pkgParam) setPackageId(pkgParam);
+    if (refParam) setReferralId(refParam);
+
+    if (pkgParam) {
+      loadPackage(pkgParam);
     }
-  }, [lockedFields, packageFromLink]);
+  }, [searchParams]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!packageId || !referralId) {
-      setError("Both Package ID and Referral ID are required.");
-      return;
+  const loadPackage = async (id: string) => {
+    const pkgDoc = await getDoc(doc(db, "packages", id));
+    if (pkgDoc.exists()) {
+      setPkgData(pkgDoc.data());
     }
+  };
 
-    // Send them to registration with IDs in query params
+  const handleRegister = () => {
     router.push(
-      `/customer/register?packageId=${encodeURIComponent(packageId)}&referralId=${encodeURIComponent(referralId)}`
+      `/auth/register?packageId=${packageId}&referralId=${referralId}`
     );
   };
 
   return (
-    <div className="max-w-xl mx-auto p-6 bg-white rounded shadow">
-      <h1 className="text-3xl font-bold mb-4 text-center">Claim Your Package</h1>
-      <p className="text-gray-600 mb-6 text-center">
-        Enter your Package ID and Referral ID to begin registration.
-      </p>
-
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block font-medium mb-1">Package ID</label>
+    <div className="flex min-h-screen bg-gray-100">
+      <Sidebar />
+      <main className="flex-1 p-6">
+        <h1 className="text-2xl font-bold mb-4">Claim Package</h1>
+        <div className="space-y-4 max-w-md bg-white p-6 shadow rounded">
           <input
             type="text"
+            placeholder="Package ID"
             value={packageId}
             onChange={(e) => setPackageId(e.target.value)}
-            readOnly={lockedFields}
-            className={`border p-2 w-full ${lockedFields ? "bg-gray-100" : ""}`}
+            disabled={!!searchParams.get("packageId")}
+            className="w-full border p-2 rounded"
           />
-        </div>
-
-        <div>
-          <label className="block font-medium mb-1">Referral ID</label>
           <input
             type="text"
+            placeholder="Referral ID"
             value={referralId}
             onChange={(e) => setReferralId(e.target.value)}
-            readOnly={lockedFields}
-            className={`border p-2 w-full ${lockedFields ? "bg-gray-100" : ""}`}
+            disabled={!!searchParams.get("referralId")}
+            className="w-full border p-2 rounded"
           />
+          {pkgData && (
+            <div className="bg-gray-50 p-4 border rounded">
+              <p>Package Name: {pkgData.name}</p>
+              <p>Price: ${pkgData.price}</p>
+            </div>
+          )}
+          <button
+            onClick={handleRegister}
+            className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700"
+          >
+            Register & Claim
+          </button>
         </div>
-
-        {error && <p className="text-red-600">{error}</p>}
-
-        <button
-          type="submit"
-          className="bg-blue-600 text-white px-4 py-2 rounded w-full"
-        >
-          Load Package
-        </button>
-      </form>
+      </main>
     </div>
   );
 }

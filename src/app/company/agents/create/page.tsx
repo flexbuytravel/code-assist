@@ -1,120 +1,94 @@
 "use client";
 
-import { useState } from "react";
-import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "@/lib/firebase"; // Adjust path if different
-import { useAuth } from "@/hooks/useAuth"; // Must provide { user }
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword } from "firebase/auth";
+import { getFirestore, doc, setDoc } from "firebase/firestore";
+import { getRoleFromClaims, hasRole, assignRole } from "@/lib/roles";
+import Sidebar from "@/components/layout/Sidebar";
 
 export default function CreateAgentPage() {
-  const { user } = useAuth();
-  const [name, setName] = useState("");
+  const auth = getAuth();
+  const db = getFirestore();
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        router.push("/auth/login");
+        return;
+      }
+      const role = await getRoleFromClaims(currentUser);
+      if (!hasRole({ ...currentUser, role }, "company")) {
+        router.push("/auth/login");
+      }
+    });
+    return () => unsub();
+  }, [auth, router]);
 
   const handleCreateAgent = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMessage("");
-
-    if (!user) {
-      setMessage("❌ You must be signed in as a company to create an agent.");
-      return;
-    }
-
-    if (!name.trim() || !email.trim() || !password.trim()) {
-      setMessage("❌ All fields are required.");
-      return;
-    }
-
-    if (!/\S+@\S+\.\S+/.test(email)) {
-      setMessage("❌ Please enter a valid email address.");
-      return;
-    }
-
-    if (password.length < 6) {
-      setMessage("❌ Password must be at least 6 characters long.");
-      return;
-    }
-
     setLoading(true);
     try {
-      const functions = getFunctions(app);
-      const createAgentFn = httpsCallable(functions, "createAgent"); // Make sure backend function exists
-
-      await createAgentFn({
+      const agentAuth = getAuth();
+      const { user } = await createUserWithEmailAndPassword(agentAuth, email, password);
+      await assignRole(user.uid, "agent");
+      await setDoc(doc(db, "agents", user.uid), {
         name,
         email,
-        password,
-        companyId: user.uid // ✅ Attach companyId explicitly
+        companyId: auth.currentUser?.uid,
       });
-
-      setMessage("✅ Agent created successfully!");
-      setName("");
-      setEmail("");
-      setPassword("");
-    } catch (err: any) {
-      console.error("Error creating agent:", err);
-      setMessage(`❌ ${err.message || "Failed to create agent."}`);
+      router.push("/company/agents");
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-xl mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Create New Agent</h1>
-      <form onSubmit={handleCreateAgent} className="space-y-4">
-        <div>
-          <label className="block font-semibold mb-1">Name</label>
+    <div className="flex min-h-screen bg-gray-100">
+      <Sidebar />
+      <main className="flex-1 p-6">
+        <h1 className="text-2xl font-bold mb-4">Create Agent</h1>
+        <form onSubmit={handleCreateAgent} className="space-y-4 max-w-md bg-white p-6 shadow rounded">
           <input
             type="text"
+            placeholder="Full Name"
             className="w-full border p-2 rounded"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
-            disabled={loading}
           />
-        </div>
-
-        <div>
-          <label className="block font-semibold mb-1">Email</label>
           <input
             type="email"
+            placeholder="Email"
             className="w-full border p-2 rounded"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            disabled={loading}
           />
-        </div>
-
-        <div>
-          <label className="block font-semibold mb-1">Password</label>
           <input
             type="password"
+            placeholder="Password"
             className="w-full border p-2 rounded"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            disabled={loading}
           />
-        </div>
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loading ? "Creating..." : "Create Agent"}
-        </button>
-      </form>
-
-      {message && (
-        <div className="mt-4 p-2 border rounded bg-gray-50">
-          {message}
-        </div>
-      )}
+          <button
+            type="submit"
+            disabled={loading}
+            className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700"
+          >
+            {loading ? "Creating..." : "Create Agent"}
+          </button>
+        </form>
+      </main>
     </div>
   );
 }

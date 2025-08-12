@@ -1,47 +1,69 @@
-// src/lib/roles.ts
+import { getAuth, getIdTokenResult } from "firebase/auth";
 
 /**
- * Define all supported roles in the system.
+ * Fetch role from custom claims
  */
-export type UserRole = "admin" | "company" | "agent" | "customer";
-
-/**
- * Helper: Check if the user has a specific role.
- */
-export function hasRole(user: any, role: UserRole): boolean {
-  if (!user) return false;
-  return user.role === role;
-}
-
-/**
- * Helper: Check if the user has one of multiple roles.
- */
-export function hasAnyRole(user: any, roles: UserRole[]): boolean {
-  if (!user) return false;
-  return roles.includes(user.role);
-}
-
-/**
- * Helper: Assign a role to a user.
- * This function is used after Firebase Auth user creation,
- * and should also be mirrored in custom claims if needed.
- */
-export async function assignRole(uid: string, role: UserRole) {
-  const { getFirestore, doc, setDoc } = await import("firebase/firestore");
-  const db = getFirestore();
-  const userRef = doc(db, "users", uid);
-  await setDoc(
-    userRef,
-    { role, updatedAt: new Date() },
-    { merge: true }
-  );
-}
-
-/**
- * Helper: Get a user's role from their ID token claims.
- */
-export async function getRoleFromClaims(user: any): Promise<UserRole | null> {
+export async function getRoleFromClaims(user: any): Promise<string | null> {
   if (!user) return null;
-  const tokenResult = await user.getIdTokenResult(true);
-  return (tokenResult.claims.role as UserRole) || null;
+  try {
+    const tokenResult = await getIdTokenResult(user);
+    return tokenResult.claims.role || null;
+  } catch (err) {
+    console.error("Error fetching role from claims:", err);
+    return null;
+  }
+}
+
+/**
+ * Role match helper
+ */
+export function hasRole(user: any, role: string): boolean {
+  return user?.role === role;
+}
+
+/**
+ * Multi-role check helper
+ */
+export function hasAnyRole(user: any, roles: string[]): boolean {
+  return roles.includes(user?.role);
+}
+
+/**
+ * Assign role to user in Firebase Auth custom claims
+ * Must be done in a Firebase Cloud Function with admin privileges.
+ */
+export async function assignRole(uid: string, role: string) {
+  // This is just the frontend interface — the actual setting of the role
+  // is done in a secure Cloud Function using admin.auth().setCustomUserClaims
+  try {
+    const res = await fetch("/api/setUserRole", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid, role }),
+    });
+    if (!res.ok) throw new Error("Failed to assign role");
+    return await res.json();
+  } catch (err) {
+    console.error("Error assigning role:", err);
+    throw err;
+  }
+}
+
+/**
+ * Convenience role shortcuts
+ */
+export function isAdmin(user: any) {
+  return hasRole(user, "admin");
+}
+
+export function isCompany(user: any) {
+  return hasRole(user, "company");
+}
+
+export function isAgent(user: any) {
+  return hasRole(user, "agent");
+}
+
+export function isCustomer(user: any) {
+  return hasRole(user, "customer");
 }

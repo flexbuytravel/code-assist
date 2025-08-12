@@ -7,6 +7,7 @@ import { db } from "@/lib/firebase";
 
 export default function CustomerDashboard() {
   const [customer, setCustomer] = useState(null);
+  const [customerId, setCustomerId] = useState("");
   const [timeLeft, setTimeLeft] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -23,8 +24,11 @@ export default function CustomerDashboard() {
         );
         if (custSnap.empty) throw new Error("Customer not found");
 
-        const custData = custSnap.docs[0].data();
+        const custDoc = custSnap.docs[0];
+        const custData = custDoc.data();
+
         setCustomer(custData);
+        setCustomerId(custDoc.id);
 
         // Countdown setup
         const expiry = custData.expiresAt.toDate ? custData.expiresAt.toDate() : custData.expiresAt;
@@ -61,41 +65,15 @@ export default function CustomerDashboard() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          customerId: customer.id,
+          customerId: customerId,
           packageId: customer.packageId
         })
       });
       const data = await res.json();
       if (data.url) {
         window.location.href = data.url;
+      } else {
+        alert("Unable to start checkout session.");
       }
     } catch (err) {
-      console.error("Error starting checkout:", err);
-    }
-  };
-
-  if (loading) return <p className="p-4">Loading dashboard...</p>;
-
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Customer Dashboard</h1>
-      {customer && (
-        <>
-          <p><strong>Package ID:</strong> {customer.packageId}</p>
-          <p><strong>Referral ID:</strong> {customer.referralId}</p>
-          <p><strong>Deposit Paid:</strong> {customer.depositPaid ? "Yes" : "No"}</p>
-          <p><strong>Time Left:</strong> {timeLeft}</p>
-
-          {!customer.depositPaid && (
-            <button
-              onClick={handlePayDeposit}
-              className="bg-green-600 text-white px-4 py-2 rounded mt-4"
-            >
-              Pay Deposit
-            </button>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
+      console.error("Error starting checkout:", err

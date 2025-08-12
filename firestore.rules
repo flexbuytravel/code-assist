@@ -2,72 +2,60 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // --- HELPERS ---
-    function signedIn() {
-      return request.auth != null;
-    }
-
-    // Agent = has a doc at agents/{uid}
-    function isAgent() {
-      return signedIn() &&
-        exists(/databases/$(database)/documents/agents/$(request.auth.uid));
-    }
-
-    // Platform admin = has a doc at admins/{uid}  (optional; only if you use it)
-    function isPlatformAdmin() {
-      return signedIn() &&
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
-    }
-
-    // For packages: the agent who owns the doc (by agentId field)
-    function isOwnerOf(doc) {
-      return signedIn() && request.auth.uid == doc.data.agentId;
-    }
-
-    // --- COLLECTIONS ---
-
-    // Each user manages their own profile
+    // === USERS COLLECTION ===
     match /users/{userId} {
-      allow create: if signedIn() && request.auth.uid == userId;
-      allow read, update, delete: if signedIn() && request.auth.uid == userId;
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if isAdmin() || request.auth.uid == userId;
     }
 
-    // Customers: signup flow writes here
-    match /customers/{customerId} {
-      allow read: if true;
-      allow create: if signedIn() && request.auth.uid == customerId;
-      allow update, delete: if signedIn() && request.auth.uid == customerId;
-    }
-
-    // Agents: allow first-time self create; self manage thereafter
-    // Admins may manage any agent doc (optional)
-    match /agents/{agentId} {
-      allow read: if true;
-      allow create: if (signedIn() && request.auth.uid == agentId) || isPlatformAdmin();
-      allow update, delete: if (signedIn() && request.auth.uid == agentId) || isPlatformAdmin();
-    }
-
-    // Companies: public read; owner can create/update; admins can manage all (optional)
+    // === COMPANIES COLLECTION ===
     match /companies/{companyId} {
-      allow read: if true;
-      allow create: if (signedIn() && request.auth.uid == companyId) || isPlatformAdmin();
-      allow update: if (signedIn() && request.auth.uid == companyId) || isPlatformAdmin();
-      // add delete if you need it:
-      // allow delete: if (signedIn() && request.auth.uid == companyId) || isPlatformAdmin();
+      allow read: if request.auth != null;
+      allow create: if isAdmin();
+      allow update, delete: if isAdmin();
     }
 
-    // Packages: agents only; only owning agent (by agentId field) can mutate
+    // === AGENTS COLLECTION ===
+    match /agents/{agentId} {
+      allow read: if request.auth != null;
+      allow create: if isCompany() && request.resource.data.companyId == getUserCompanyId();
+      allow update, delete: if isCompany() && resource.data.companyId == getUserCompanyId();
+    }
+
+    // === PACKAGES COLLECTION ===
     match /packages/{packageId} {
-      allow read: if true;
-      allow create: if isAgent() || isPlatformAdmin();
-      allow update: if (isAgent() && isOwnerOf(resource)) || isPlatformAdmin();
-      allow delete: if ((isAgent() && isOwnerOf(resource) && resource.data.status == 'Pending')
-                        || isPlatformAdmin());
+      allow read: if request.auth != null;
+
+      // Create: Agent can only create packages for their own company
+      allow create: if isAgent() && request.resource.data.companyId == getUserCompanyId()
+                    && request.resource.data.agentId == request.auth.uid;
+
+      // Update: Only allowed before claim
+      allow update: if (
+        (isAgent() && resource.data.companyId == getUserCompanyId() && resource.data.claimed == false)
+        || isCompany()
+        || isAdmin()
+      );
+
+      // Delete: Only Admin or Company that owns the package
+      allow delete: if (isCompany() && resource.data.companyId == getUserCompanyId()) || isAdmin();
     }
 
-    // Default deny
-    match /{document=**} {
-      allow read, write: if false;
+    // === HELPERS ===
+    function isAdmin() {
+      return request.auth.token.role == "admin";
+    }
+
+    function isCompany() {
+      return request.auth.token.role == "company";
+    }
+
+    function isAgent() {
+      return request.auth.token.role == "agent";
+    }
+
+    function getUserCompanyId() {
+      return request.auth.token.companyId;
     }
   }
 }

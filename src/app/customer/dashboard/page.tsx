@@ -12,6 +12,7 @@ export default function CustomerDashboardPage() {
   const [customerData, setCustomerData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [timeLeft, setTimeLeft] = useState<string | null>(null);
+  const [status, setStatus] = useState<"pending" | "depositPaid" | "expired">("pending");
 
   const fetchCustomerData = async () => {
     if (!auth.currentUser) return;
@@ -23,16 +24,20 @@ export default function CustomerDashboardPage() {
       const data = snapshot.data();
       setCustomerData(data);
 
-      if (data.claimTimestamp) {
-        startCountdown(new Date(data.claimTimestamp));
+      if (data.depositPaid) {
+        setStatus("depositPaid");
+        startCountdown(new Date(data.depositTimestamp), 6 * 30 * 24 * 60 * 60 * 1000); // 6 months
+      } else if (data.claimTimestamp) {
+        setStatus("pending");
+        startCountdown(new Date(data.claimTimestamp), 48 * 60 * 60 * 1000); // 48 hours
       }
     }
     setLoading(false);
   };
 
   // Countdown logic
-  const startCountdown = (claimTime: Date) => {
-    const endTime = claimTime.getTime() + 48 * 60 * 60 * 1000; // +48 hours
+  const startCountdown = (startTime: Date, durationMs: number) => {
+    const endTime = startTime.getTime() + durationMs;
 
     const interval = setInterval(() => {
       const now = Date.now();
@@ -41,11 +46,18 @@ export default function CustomerDashboardPage() {
       if (diff <= 0) {
         clearInterval(interval);
         setTimeLeft("Time expired");
+        setStatus("expired");
       } else {
-        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
         const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
         const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-        setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+
+        if (days > 0) {
+          setTimeLeft(`${days}d ${hours}h ${minutes}m ${seconds}s`);
+        } else {
+          setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+        }
       }
     }, 1000);
   };
@@ -79,8 +91,29 @@ export default function CustomerDashboardPage() {
 
           {timeLeft && (
             <div style={{ marginTop: "10px" }}>
-              <strong>Time Remaining to Purchase:</strong> {timeLeft}
+              <strong>
+                {status === "depositPaid"
+                  ? "Time Remaining to Pay Balance:"
+                  : "Time Remaining to Pay Deposit:"}
+              </strong>{" "}
+              {timeLeft}
             </div>
+          )}
+
+          {status === "pending" && timeLeft !== "Time expired" && (
+            <button style={{ marginTop: "10px" }} onClick={() => alert("Go to Stripe Checkout")}>
+              Pay Deposit
+            </button>
+          )}
+
+          {status === "depositPaid" && timeLeft !== "Time expired" && (
+            <button style={{ marginTop: "10px" }} onClick={() => alert("Go to Final Payment")}>
+              Pay Remaining Balance
+            </button>
+          )}
+
+          {status === "expired" && (
+            <p style={{ color: "red", marginTop: "10px" }}>This package has expired.</p>
           )}
         </div>
       )}

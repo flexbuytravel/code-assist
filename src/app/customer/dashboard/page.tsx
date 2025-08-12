@@ -50,7 +50,7 @@ export default function CustomerDashboard() {
           }, 1000);
           return () => clearInterval(interval);
         }
-      } catch (err) {
+      } catch {
         setError("Error loading dashboard.");
       } finally {
         setLoading(false);
@@ -78,9 +78,6 @@ export default function CustomerDashboard() {
             Proceed to Payment
           </Link>
         )}
-        <Link href="/customer/timer" className="bg-gray-600 text-white px-4 py-2 rounded">
-          View Timer
-        </Link>
       </div>
     </div>
   );

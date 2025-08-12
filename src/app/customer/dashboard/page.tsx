@@ -1,98 +1,100 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useAuth } from "@/hooks/useAuth"; // Your auth hook
+import { useState, useEffect } from "react";
+import { getAuth } from "firebase/auth";
+import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
 
 export default function CustomerDashboard() {
-  const { user } = useAuth();
-  const [customerData, setCustomerData] = useState<any>(null);
+  const [customer, setCustomer] = useState(null);
+  const [timeLeft, setTimeLeft] = useState("");
   const [loading, setLoading] = useState(true);
-  const [paying, setPaying] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
-
-    const fetchCustomerData = async () => {
+    const fetchCustomer = async () => {
       try {
-        const docRef = doc(db, "customers", user.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setCustomerData(docSnap.data());
-        }
+        setLoading(true);
+        const auth = getAuth();
+        const uid = auth.currentUser?.uid;
+        if (!uid) throw new Error("Not authenticated");
+
+        const custSnap = await getDocs(
+          query(collection(db, "customers"), where("uid", "==", uid))
+        );
+        if (custSnap.empty) throw new Error("Customer not found");
+
+        const custData = custSnap.docs[0].data();
+        setCustomer(custData);
+
+        // Countdown setup
+        const expiry = custData.expiresAt.toDate ? custData.expiresAt.toDate() : custData.expiresAt;
+        const updateTimer = () => {
+          const now = new Date();
+          const diff = expiry - now;
+          if (diff <= 0) {
+            setTimeLeft("Expired");
+            return;
+          }
+          const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+          const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+          const minutes = Math.floor((diff / (1000 * 60)) % 60);
+          setTimeLeft(`${days}d ${hours}h ${minutes}m`);
+        };
+
+        updateTimer();
+        const timerInterval = setInterval(updateTimer, 60000); // every minute
+        return () => clearInterval(timerInterval);
+
       } catch (err) {
-        console.error("Error fetching customer data:", err);
+        console.error("Error loading customer dashboard:", err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchCustomerData();
-  }, [user]);
+    fetchCustomer();
+  }, []);
 
   const handlePayDeposit = async () => {
-    if (!customerData || !customerData.packageId) {
-      alert("No package found for your account.");
-      return;
-    }
-
-    setPaying(true);
     try {
       const res = await fetch("/api/createCheckoutSession", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          customerId: user?.uid,
-          packageId: customerData.packageId,
-          price: customerData.depositAmount || 100, // fallback default
-        }),
+          customerId: customer.id,
+          packageId: customer.packageId
+        })
       });
-
-      const { url, error } = await res.json();
-      if (error) {
-        alert(error);
-        setPaying(false);
-        return;
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
       }
-      window.location.href = url; // Redirect to Stripe
     } catch (err) {
-      console.error("Payment error:", err);
-      setPaying(false);
+      console.error("Error starting checkout:", err);
     }
   };
 
-  if (loading) return <p>Loading dashboard...</p>;
+  if (loading) return <p className="p-4">Loading dashboard...</p>;
 
   return (
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-4">Customer Dashboard</h1>
+      {customer && (
+        <>
+          <p><strong>Package ID:</strong> {customer.packageId}</p>
+          <p><strong>Referral ID:</strong> {customer.referralId}</p>
+          <p><strong>Deposit Paid:</strong> {customer.depositPaid ? "Yes" : "No"}</p>
+          <p><strong>Time Left:</strong> {timeLeft}</p>
 
-      {customerData && (
-        <div className="bg-white shadow-md rounded p-4 mb-6">
-          <p><strong>Package ID:</strong> {customerData.packageId}</p>
-          <p><strong>Referral ID:</strong> {customerData.referralId}</p>
-          <p>
-            <strong>Deposit Paid:</strong>{" "}
-            {customerData.depositPaid ? "✅ Yes" : "❌ No"}
-          </p>
-          {customerData.expiryDate && (
-            <p>
-              <strong>Expiry Date:</strong>{" "}
-              {new Date(customerData.expiryDate.seconds * 1000).toLocaleString()}
-            </p>
-          )}
-
-          {!customerData.depositPaid && (
+          {!customer.depositPaid && (
             <button
               onClick={handlePayDeposit}
-              disabled={paying}
-              className="mt-4 px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              className="bg-green-600 text-white px-4 py-2 rounded mt-4"
             >
-              {paying ? "Processing..." : "Pay Deposit"}
+              Pay Deposit
             </button>
           )}
-        </div>
+        </>
       )}
     </div>
   );

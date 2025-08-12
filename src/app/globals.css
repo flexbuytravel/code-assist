@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 180 52% 94%; /* pale turquoise */
+    --foreground: 215 28% 17%;
+    --card: 180 40% 98%;
+    --card-foreground: 215 28% 17%;
+    --popover: 180 40% 98%;
+    --popover-foreground: 215 28% 17%;
+    --primary: 174 72% 56%; /* vibrant turquoise */
+    --primary-foreground: 215 28% 17%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222 47% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215 20% 45.1%;
+    --accent: 54 78% 79%; /* sandy beige */
+    --accent-foreground: 215 28% 17%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 180 30% 85%;
+    --input: 180 30% 85%;
+    --ring: 174 72% 56%;
+    --chart-1: 174 72% 56%;
+    --chart-2: 54 78% 79%;
+    --chart-3: 215 28% 17%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222 47% 11.2%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 11.2%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 11.2%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 174 72% 56%;
+    --primary-foreground: 222 47% 11.2%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65.1%;
+    --accent: 54 78% 79%;
+    --accent-foreground: 222 47% 11.2%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 174 72% 56%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'PT Sans', sans-serif;
+  }
+}

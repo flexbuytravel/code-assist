@@ -1,85 +1,120 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { auth, firestore } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
-import { firestore } from "@/lib/firebase";
-import { useAuth } from "@/hooks/useAuth";
 
 export default function CustomerDashboard() {
-  const { user } = useAuth();
+  const router = useRouter();
+  const [userId, setUserId] = useState<string | null>(null);
   const [customerData, setCustomerData] = useState<any>(null);
-  const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [paymentType, setPaymentType] = useState<"deposit" | "full">("full");
+  const [insurance, setInsurance] = useState(false);
+  const [processingPayment, setProcessingPayment] = useState(false);
+
   useEffect(() => {
-    if (!user) return;
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        setUserId(user.uid);
 
-    const fetchData = async () => {
-      const ref = doc(firestore, "customers", user.uid);
-      const snap = await getDoc(ref);
-      if (snap.exists()) {
-        const data = snap.data();
-        setCustomerData(data);
+        const customerRef = doc(firestore, "customers", user.uid);
+        const customerSnap = await getDoc(customerRef);
 
-        if (data.fullyPaid) {
-          // Full payment - no countdown
-          setTimeLeft(null);
-        } else if (data.expiresAt) {
-          const expiry = new Date(data.expiresAt).getTime();
-          setTimeLeft(Math.max(0, expiry - Date.now()));
+        if (customerSnap.exists()) {
+          setCustomerData(customerSnap.data());
         }
+      } else {
+        router.push("/auth/login");
       }
       setLoading(false);
-    };
+    });
 
-    fetchData();
-  }, [user]);
+    return () => unsubscribe();
+  }, [router]);
 
-  // Countdown tick
-  useEffect(() => {
-    if (timeLeft === null) return;
+  const handlePayment = async () => {
+    if (!userId) return;
 
-    const interval = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev && prev > 1000) return prev - 1000;
-        return 0;
+    setProcessingPayment(true);
+
+    try {
+      const res = await fetch("/api/stripe/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: userId,
+          paymentType,
+          insurance,
+        }),
       });
-    }, 1000);
 
-    return () => clearInterval(interval);
-  }, [timeLeft]);
+      const data = await res.json();
+
+      if (data.url) {
+        window.location.href = data.url; // Redirect to Stripe Checkout
+      } else {
+        console.error("Failed to create checkout session:", data.error);
+      }
+    } catch (error) {
+      console.error("Payment error:", error);
+    } finally {
+      setProcessingPayment(false);
+    }
+  };
 
   if (loading) return <p>Loading dashboard...</p>;
 
-  if (!customerData) return <p>No customer data found.</p>;
-
-  const formatTime = (ms: number) => {
-    const totalSeconds = Math.floor(ms / 1000);
-    const days = Math.floor(totalSeconds / (3600 * 24));
-    const hours = Math.floor((totalSeconds % (3600 * 24)) / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    return `${days}d ${hours}h ${minutes}m ${seconds}s`;
-  };
-
   return (
-    <div className="p-6">
+    <div className="max-w-3xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-4">Customer Dashboard</h1>
 
-      {customerData.fullyPaid ? (
-        <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
-          ✅ Your package is fully paid. Thank you!
-        </div>
-      ) : customerData.depositPaid ? (
-        <div className="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded">
-          Deposit paid. Time remaining to complete purchase:{" "}
-          <strong>{timeLeft !== null ? formatTime(timeLeft) : "Loading..."}</strong>
+      {customerData?.packageId ? (
+        <div className="border p-4 rounded-lg bg-white shadow">
+          <p>
+            <strong>Package ID:</strong> {customerData.packageId}
+          </p>
+          <p>
+            <strong>Price per Trip:</strong> ${customerData.packagePrice}
+          </p>
+          <p>
+            <strong>Trips:</strong> {customerData.tripCount}
+          </p>
+
+          <div className="mt-4 space-y-3">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={paymentType === "deposit"}
+                onChange={(e) =>
+                  setPaymentType(e.target.checked ? "deposit" : "full")
+                }
+              />
+              Pay Deposit Only (20% now, balance later)
+            </label>
+
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={insurance}
+                onChange={(e) => setInsurance(e.target.checked)}
+              />
+              Add Trip Insurance (doubles trips)
+            </label>
+
+            <button
+              onClick={handlePayment}
+              disabled={processingPayment}
+              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            >
+              {processingPayment ? "Processing..." : "Pay Now"}
+            </button>
+          </div>
         </div>
       ) : (
-        <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded">
-          Please complete payment within:{" "}
-          <strong>{timeLeft !== null ? formatTime(timeLeft) : "Loading..."}</strong>
-        </div>
+        <p>No package assigned yet.</p>
       )}
     </div>
   );

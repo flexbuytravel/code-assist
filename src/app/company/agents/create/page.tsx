@@ -1,94 +1,62 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword } from "firebase/auth";
-import { getFirestore, doc, setDoc } from "firebase/firestore";
-import { getRoleFromClaims, hasRole, assignRole } from "@/lib/roles";
-import Sidebar from "@/components/layout/Sidebar";
+import { useState } from "react";
+import { assignRole } from "@/lib/roles";
+import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
+import { getFirestore, collection, addDoc } from "firebase/firestore";
+import { app } from "@/lib/firebase";
 
 export default function CreateAgentPage() {
-  const auth = getAuth();
-  const db = getFirestore();
-  const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        router.push("/auth/login");
-        return;
-      }
-      const role = await getRoleFromClaims(currentUser);
-      if (!hasRole({ ...currentUser, role }, "company")) {
-        router.push("/auth/login");
-      }
-    });
-    return () => unsub();
-  }, [auth, router]);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
 
-  const handleCreateAgent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+  const handleCreateAgent = async () => {
     try {
-      const agentAuth = getAuth();
-      const { user } = await createUserWithEmailAndPassword(agentAuth, email, password);
-      await assignRole(user.uid, "agent");
-      await setDoc(doc(db, "agents", user.uid), {
-        name,
-        email,
-        companyId: auth.currentUser?.uid,
+      // Create agent's Auth account
+      const cred = await createUserWithEmailAndPassword(auth, form.email, form.password);
+
+      // Save to Firestore
+      await addDoc(collection(db, "agents"), {
+        name: form.name,
+        email: form.email,
+        uid: cred.user.uid,
+        createdAt: new Date(),
       });
-      router.push("/company/agents");
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+
+      // Assign role via new helper
+      await assignRole(cred.user.uid, "agent");
+
+      alert("Agent created successfully!");
+      setForm({ name: "", email: "", password: "" });
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message);
     }
   };
 
   return (
-    <div className="flex min-h-screen bg-gray-100">
-      <Sidebar />
-      <main className="flex-1 p-6">
-        <h1 className="text-2xl font-bold mb-4">Create Agent</h1>
-        <form onSubmit={handleCreateAgent} className="space-y-4 max-w-md bg-white p-6 shadow rounded">
-          <input
-            type="text"
-            placeholder="Full Name"
-            className="w-full border p-2 rounded"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-          <input
-            type="email"
-            placeholder="Email"
-            className="w-full border p-2 rounded"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            className="w-full border p-2 rounded"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          <button
-            type="submit"
-            disabled={loading}
-            className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700"
-          >
-            {loading ? "Creating..." : "Create Agent"}
-          </button>
-        </form>
-      </main>
+    <div>
+      <h1>Create Agent</h1>
+      <input
+        placeholder="Agent Name"
+        value={form.name}
+        onChange={(e) => setForm({ ...form, name: e.target.value })}
+      />
+      <input
+        placeholder="Email"
+        type="email"
+        value={form.email}
+        onChange={(e) => setForm({ ...form, email: e.target.value })}
+      />
+      <input
+        placeholder="Password"
+        type="password"
+        value={form.password}
+        onChange={(e) => setForm({ ...form, password: e.target.value })}
+      />
+      <button onClick={handleCreateAgent}>Create Agent</button>
     </div>
   );
 }

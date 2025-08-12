@@ -1,23 +1,17 @@
 import { buffer } from "micro";
-import * as admin from "firebase-admin";
 import Stripe from "stripe";
-
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-  });
-}
-
-const db = admin.firestore();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: "2024-06-20", // Match your Stripe account API version
-});
+import { db } from "@/lib/firebase";
+import { doc, updateDoc } from "firebase/firestore";
 
 export const config = {
   api: {
-    bodyParser: false,
+    bodyParser: false, // Stripe requires raw body
   },
 };
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2024-06-20", // use your actual Stripe API version
+});
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
@@ -25,16 +19,15 @@ export default async function handler(req: any, res: any) {
     return res.status(405).end("Method Not Allowed");
   }
 
-  const sig = req.headers["stripe-signature"];
-  const buf = await buffer(req);
-
+  const sig = req.headers["stripe-signature"]!;
   let event;
 
   try {
+    const buf = await buffer(req);
     event = stripe.webhooks.constructEvent(
-      buf,
-      sig!,
-      process.env.STRIPE_WEBHOOK_SECRET as string
+      buf.toString(),
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET!
     );
   } catch (err: any) {
     console.error("Webhook signature verification failed:", err.message);
@@ -43,33 +36,18 @@ export default async function handler(req: any, res: any) {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    const customerId = session.metadata?.customerId;
-    const paymentType = session.metadata?.paymentType; // "deposit" or "full"
-    const insurance = session.metadata?.insurance === "true";
+    const metadata = session.metadata || {};
+    const customerId = metadata.customerId;
+    const paymentType = metadata.paymentType; // deposit or full
+    const insurance = metadata.insurance === "true";
 
-    let trips = 0;
-    let deadline: Date | null = null;
+    console.log(`Processing payment for customer ${customerId}`);
 
-    if (paymentType === "deposit") {
-      trips = insurance ? 2 : 1;
-      deadline = new Date();
-      deadline.setMonth(deadline.getMonth() + 6); // 6 months
-    } else if (paymentType === "full") {
-      trips = insurance ? 4 : 2;
-      if (insurance) {
-        deadline = new Date();
-        deadline.setMonth(deadline.getMonth() + 54); // 54 months
-      }
-    }
+    try {
+      let tripCount = 0;
+      let expiryDate: Date | null = null;
 
-    if (customerId) {
-      await db.collection("customers").doc(customerId).update({
-        paymentStatus: "paid",
-        tripsAvailable: trips,
-        bookingDeadline: deadline ? admin.firestore.Timestamp.fromDate(deadline) : null,
-      });
-    }
-  }
-
-  res.status(200).json({ received: true });
-}
+      if (paymentType === "deposit") {
+        tripCount = insurance ? 2 : 1; // deposit gives 1 trip, insurance doubles
+        expiryDate = new Date();
+        expiryDate.setMonth(expiryDate.getMonth() + 6); // +6

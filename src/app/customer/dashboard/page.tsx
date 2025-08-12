@@ -1,102 +1,97 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getAuth } from "firebase/auth";
-import { getFirestore, doc, getDoc, updateDoc } from "firebase/firestore";
-import { app } from "@/lib/firebase";
+import { useAuth } from "@/hooks/useAuth"; // Your auth hook
+import { db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
 
-export default function CustomerDashboardPage() {
-  const auth = getAuth(app);
-  const db = getFirestore(app);
-
+export default function CustomerDashboard() {
+  const { user } = useAuth();
   const [customerData, setCustomerData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [timeLeft, setTimeLeft] = useState<string | null>(null);
-  const [status, setStatus] = useState<"pending" | "depositPaid" | "expired">("pending");
-
-  const fetchCustomerData = async () => {
-    if (!auth.currentUser) return;
-
-    const customerRef = doc(db, "customers", auth.currentUser.uid);
-    const snapshot = await getDoc(customerRef);
-
-    if (snapshot.exists()) {
-      const data = snapshot.data();
-      setCustomerData(data);
-
-      if (data.depositPaid) {
-        setStatus("depositPaid");
-        startCountdown(new Date(data.depositTimestamp), 6 * 30 * 24 * 60 * 60 * 1000);
-      } else if (data.claimTimestamp) {
-        setStatus("pending");
-        startCountdown(new Date(data.claimTimestamp), 48 * 60 * 60 * 1000);
-      }
-    }
-    setLoading(false);
-  };
-
-  const startCountdown = (startTime: Date, durationMs: number) => {
-    const endTime = startTime.getTime() + durationMs;
-
-    const interval = setInterval(() => {
-      const now = Date.now();
-      const diff = endTime - now;
-
-      if (diff <= 0) {
-        clearInterval(interval);
-        setTimeLeft("Time expired");
-        setStatus("expired");
-      } else {
-        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-        setTimeLeft(days > 0 ? `${days}d ${hours}h ${minutes}m ${seconds}s` : `${hours}h ${minutes}m ${seconds}s`);
-      }
-    }, 1000);
-  };
-
-  const markDepositPaid = async () => {
-    if (!auth.currentUser) return;
-    const customerRef = doc(db, "customers", auth.currentUser.uid);
-    await updateDoc(customerRef, {
-      depositPaid: true,
-      depositTimestamp: new Date().toISOString()
-    });
-    fetchCustomerData();
-  };
+  const [paying, setPaying] = useState(false);
 
   useEffect(() => {
+    if (!user) return;
+
+    const fetchCustomerData = async () => {
+      try {
+        const docRef = doc(db, "customers", user.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setCustomerData(docSnap.data());
+        }
+      } catch (err) {
+        console.error("Error fetching customer data:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     fetchCustomerData();
-  }, [auth.currentUser]);
+  }, [user]);
+
+  const handlePayDeposit = async () => {
+    if (!customerData || !customerData.packageId) {
+      alert("No package found for your account.");
+      return;
+    }
+
+    setPaying(true);
+    try {
+      const res = await fetch("/api/createCheckoutSession", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: user?.uid,
+          packageId: customerData.packageId,
+          price: customerData.depositAmount || 100, // fallback default
+        }),
+      });
+
+      const { url, error } = await res.json();
+      if (error) {
+        alert(error);
+        setPaying(false);
+        return;
+      }
+      window.location.href = url; // Redirect to Stripe
+    } catch (err) {
+      console.error("Payment error:", err);
+      setPaying(false);
+    }
+  };
 
   if (loading) return <p>Loading dashboard...</p>;
-  if (!customerData) return <p>No customer data found.</p>;
 
   return (
-    <div>
-      <h1>Customer Dashboard</h1>
-      <p>Name: {customerData.name}</p>
-      <p>Email: {customerData.email}</p>
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-4">Customer Dashboard</h1>
 
-      {customerData.packageId && (
-        <div>
-          <h2>Package Details</h2>
-          <p>Package ID: {customerData.packageId}</p>
-          <p>Price: ${customerData.packagePrice}</p>
-          {timeLeft && (
-            <div style={{ marginTop: "10px" }}>
-              <strong>{status === "depositPaid" ? "Time Remaining to Pay Balance:" : "Time Remaining to Pay Deposit:"}</strong> {timeLeft}
-            </div>
+      {customerData && (
+        <div className="bg-white shadow-md rounded p-4 mb-6">
+          <p><strong>Package ID:</strong> {customerData.packageId}</p>
+          <p><strong>Referral ID:</strong> {customerData.referralId}</p>
+          <p>
+            <strong>Deposit Paid:</strong>{" "}
+            {customerData.depositPaid ? "✅ Yes" : "❌ No"}
+          </p>
+          {customerData.expiryDate && (
+            <p>
+              <strong>Expiry Date:</strong>{" "}
+              {new Date(customerData.expiryDate.seconds * 1000).toLocaleString()}
+            </p>
           )}
 
-          {status === "pending" && timeLeft !== "Time expired" && (
-            <button onClick={markDepositPaid}>Pay Deposit (Temp Button)</button>
+          {!customerData.depositPaid && (
+            <button
+              onClick={handlePayDeposit}
+              disabled={paying}
+              className="mt-4 px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              {paying ? "Processing..." : "Pay Deposit"}
+            </button>
           )}
-          {status === "depositPaid" && timeLeft !== "Time expired" && (
-            <button onClick={() => alert("Go to Final Payment")}>Pay Remaining Balance</button>
-          )}
-          {status === "expired" && <p style={{ color: "red" }}>This package has expired.</p>}
         </div>
       )}
     </div>

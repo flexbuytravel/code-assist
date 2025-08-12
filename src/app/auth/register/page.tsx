@@ -1,15 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 export default function RegisterPage() {
-  const searchParams = useSearchParams();
   const router = useRouter();
-
-  // Pre-fill from query params if coming from Load Package
-  const prefilledPackageId = searchParams.get("packageId") || "";
-  const prefilledReferral = searchParams.get("referralCode") || "";
+  const searchParams = useSearchParams();
 
   const [formData, setFormData] = useState({
     name: "",
@@ -18,155 +14,160 @@ export default function RegisterPage() {
     confirmPassword: "",
     phone: "",
     address: "",
-    packageId: prefilledPackageId,
-    referralCode: prefilledReferral,
+    packageId: "",
+    referralId: ""
   });
 
-  const [isLoading, setIsLoading] = useState(false);
+  const [lockedFields, setLockedFields] = useState(false);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // Read URL params on mount
+  useEffect(() => {
+    const pkgId = searchParams.get("packageId") || "";
+    const refId = searchParams.get("referralId") || "";
+
+    if (pkgId && refId) {
+      setFormData((prev) => ({
+        ...prev,
+        packageId: pkgId,
+        referralId: refId
+      }));
+      setLockedFields(true);
+    }
+  }, [searchParams]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const validateForm = () => {
+    if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword) {
+      return "Please fill in all required fields.";
+    }
+    if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      return "Invalid email address.";
+    }
+    if (formData.password.length < 8) {
+      return "Password must be at least 8 characters.";
+    }
+    if (formData.password !== formData.confirmPassword) {
+      return "Passwords do not match.";
+    }
+    if (!formData.packageId || !formData.referralId) {
+      return "Package ID and Referral ID are required.";
+    }
+    return "";
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    setSuccess(false);
-
-    // Client-side validation
-    if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword || !formData.phone || !formData.address || !formData.packageId) {
-      setError("All fields are required.");
+    const validationError = validateForm();
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
-    if (formData.password !== formData.confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
-
-    if (formData.password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(formData.email)) {
-      setError("Invalid email format.");
-      return;
-    }
-
+    setLoading(true);
     try {
-      setIsLoading(true);
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        setError(data.error || "Something went wrong.");
-        setIsLoading(false);
-        return;
+        const data = await res.json();
+        throw new Error(data.error || "Registration failed.");
       }
 
-      setSuccess(true);
-      setIsLoading(false);
-
-      // Redirect to customer dashboard after successful registration
       router.push("/customer/dashboard");
     } catch (err: any) {
-      console.error(err);
-      setError("An unexpected error occurred.");
-      setIsLoading(false);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-md mx-auto py-10">
+    <div className="max-w-md mx-auto p-6 bg-white shadow rounded">
       <h1 className="text-2xl font-bold mb-4">Register</h1>
-
-      {error && <div className="bg-red-100 text-red-600 p-2 mb-4 rounded">{error}</div>}
-      {success && <div className="bg-green-100 text-green-600 p-2 mb-4 rounded">Registration successful!</div>}
-
+      {error && <p className="text-red-500 mb-4">{error}</p>}
       <form onSubmit={handleSubmit} className="space-y-4">
         <input
-          name="name"
           type="text"
+          name="name"
           placeholder="Full Name"
           value={formData.name}
           onChange={handleChange}
-          className="w-full p-2 border rounded"
+          className="w-full border p-2 rounded"
         />
         <input
-          name="email"
           type="email"
-          placeholder="Email Address"
+          name="email"
+          placeholder="Email"
           value={formData.email}
           onChange={handleChange}
-          className="w-full p-2 border rounded"
+          className="w-full border p-2 rounded"
         />
         <input
-          name="password"
           type="password"
+          name="password"
           placeholder="Password"
           value={formData.password}
           onChange={handleChange}
-          className="w-full p-2 border rounded"
+          className="w-full border p-2 rounded"
         />
         <input
-          name="confirmPassword"
           type="password"
+          name="confirmPassword"
           placeholder="Confirm Password"
           value={formData.confirmPassword}
           onChange={handleChange}
-          className="w-full p-2 border rounded"
+          className="w-full border p-2 rounded"
         />
         <input
-          name="phone"
           type="tel"
+          name="phone"
           placeholder="Phone Number"
           value={formData.phone}
           onChange={handleChange}
-          className="w-full p-2 border rounded"
+          className="w-full border p-2 rounded"
         />
         <input
-          name="address"
           type="text"
+          name="address"
           placeholder="Address"
           value={formData.address}
           onChange={handleChange}
-          className="w-full p-2 border rounded"
+          className="w-full border p-2 rounded"
         />
-
         <input
-          name="packageId"
           type="text"
+          name="packageId"
           placeholder="Package ID"
           value={formData.packageId}
           onChange={handleChange}
-          className="w-full p-2 border rounded"
-          readOnly={!!prefilledPackageId}
+          readOnly={lockedFields}
+          className={`w-full border p-2 rounded ${lockedFields ? "bg-gray-100" : ""}`}
         />
         <input
-          name="referralCode"
           type="text"
-          placeholder="Referral Code"
-          value={formData.referralCode}
+          name="referralId"
+          placeholder="Referral ID"
+          value={formData.referralId}
           onChange={handleChange}
-          className="w-full p-2 border rounded"
-          readOnly={!!prefilledReferral}
+          readOnly={lockedFields}
+          className={`w-full border p-2 rounded ${lockedFields ? "bg-gray-100" : ""}`}
         />
-
         <button
           type="submit"
-          disabled={isLoading}
-          className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded"
+          disabled={loading}
+          className="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600"
         >
-          {isLoading ? "Registering..." : "Register"}
+          {loading ? "Registering..." : "Register"}
         </button>
       </form>
     </div>

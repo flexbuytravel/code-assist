@@ -1,86 +1,78 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth, db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, doc, getDoc } from "firebase/firestore";
+import { getRoleFromClaims, hasRole } from "@/lib/roles";
+import Sidebar from "@/components/layout/Sidebar";
 
 export default function CustomerDashboard() {
+  const auth = getAuth();
+  const db = getFirestore();
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [customer, setCustomer] = useState<any>(null);
   const [timeLeft, setTimeLeft] = useState<string>("");
 
-  // Calculate countdown
-  const calculateTimeLeft = (claimedAt: number) => {
-    const expiry = claimedAt + 48 * 60 * 60 * 1000; // 48 hours
-    const diff = expiry - Date.now();
-    if (diff <= 0) return "Expired";
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-    return `${hours}h ${minutes}m ${seconds}s`;
-  };
-
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      if (!u) {
-        router.push("/home");
+    const unsub = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        router.push("/auth/login");
         return;
       }
-      try {
-        const userDoc = await getDoc(doc(db, "users", u.uid));
-        if (!userDoc.exists()) {
-          setError("User record not found.");
-          return;
-        }
-        const userData = userDoc.data();
-        if (userData.role !== "customer") {
-          router.push("/home");
-          return;
-        }
+      const role = await getRoleFromClaims(currentUser);
+      if (!hasRole({ ...currentUser, role }, "customer")) {
+        router.push("/auth/login");
+        return;
+      }
 
-        setUser({ uid: u.uid, ...userData });
-
-        if (userData.packageClaimedAt) {
-          setTimeLeft(calculateTimeLeft(userData.packageClaimedAt));
-          const interval = setInterval(() => {
-            setTimeLeft(calculateTimeLeft(userData.packageClaimedAt));
-          }, 1000);
-          return () => clearInterval(interval);
+      const customerDoc = await getDoc(doc(db, "customers", currentUser.uid));
+      if (customerDoc.exists()) {
+        const data = customerDoc.data();
+        setCustomer(data);
+        if (data.claimedAt) {
+          startCountdown(new Date(data.claimedAt.seconds * 1000));
         }
-      } catch {
-        setError("Error loading dashboard.");
-      } finally {
-        setLoading(false);
       }
     });
     return () => unsub();
-  }, [router]);
+  }, [auth, db, router]);
 
-  if (loading) return <div>Loading...</div>;
-  if (error) return <div className="text-red-600">{error}</div>;
+  const startCountdown = (claimedAt: Date) => {
+    const deadline = new Date(claimedAt.getTime() + 48 * 60 * 60 * 1000);
+    const interval = setInterval(() => {
+      const now = new Date().getTime();
+      const diff = deadline.getTime() - now;
+      if (diff <= 0) {
+        clearInterval(interval);
+        setTimeLeft("Expired");
+      } else {
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+        setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+      }
+    }, 1000);
+  };
 
   return (
-    <div>
-      <h1 className="text-3xl font-bold mb-4">Customer Dashboard</h1>
-      {user?.packageId && (
-        <div className="mb-4">
-          <p><span className="font-semibold">Package:</span> {user.packageId}</p>
-          <p><span className="font-semibold">Referral:</span> {user.referralId}</p>
-          <p><span className="font-semibold">Time left:</span> <span className="font-bold text-red-600">{timeLeft}</span></p>
-        </div>
-      )}
-      <div className="space-y-4">
-        {user?.packageId && (
-          <Link href={`/checkout?packageId=${user.packageId}`} className="bg-green-600 text-white px-4 py-2 rounded">
-            Proceed to Payment
-          </Link>
+    <div className="flex min-h-screen bg-gray-100">
+      <Sidebar />
+      <main className="flex-1 p-6">
+        <h1 className="text-2xl font-bold mb-4">Customer Dashboard</h1>
+        {customer && (
+          <>
+            <p>Welcome, {customer.name}</p>
+            {timeLeft && (
+              <div className="mt-4 p-4 bg-yellow-100 rounded border border-yellow-300">
+                <p className="font-semibold">
+                  Time left to purchase: {timeLeft}
+                </p>
+              </div>
+            )}
+          </>
         )}
-      </div>
+      </main>
     </div>
   );
 }

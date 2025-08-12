@@ -1,37 +1,81 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import { v4 as uuidv4 } from "uuid";
 
-admin.initializeApp();
 const db = admin.firestore();
 
 /**
- * Callable function for agents to create packages
+ * Cloud Function: createPackage
+ * Allows an agent to create a travel package
+ * Ensures both agentId and companyId are stored so packages are never orphaned
  */
 export const createPackage = functions.https.onCall(async (data, context) => {
-  if (context.auth?.token.role !== "agent") {
-    throw new functions.https.HttpsError("permission-denied", "Only agents can create packages.");
+  try {
+    // Auth check
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "User must be authenticated to create a package."
+      );
+    }
+
+    const uid = context.auth.uid;
+    const { name, description, price } = data;
+
+    if (!name || !price) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Package name and price are required."
+      );
+    }
+
+    // Get the agent document
+    const agentDoc = await db.collection("agents").doc(uid).get();
+
+    if (!agentDoc.exists) {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "Only agents can create packages."
+      );
+    }
+
+    const agentData = agentDoc.data();
+    if (!agentData || !agentData.companyId) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Agent is missing a companyId."
+      );
+    }
+
+    const companyId = agentData.companyId;
+
+    // Generate referral code (simple random string for now)
+    const referralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+
+    // Create package
+    const packageRef = db.collection("packages").doc();
+    const packageData = {
+      packageId: packageRef.id,
+      name,
+      description: description || "",
+      price,
+      referralCode,
+      agentId: uid,
+      companyId, // ✅ stored directly
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      status: "active"
+    };
+
+    await packageRef.set(packageData);
+
+    return {
+      message: "Package created successfully.",
+      package: packageData
+    };
+  } catch (error: any) {
+    console.error("Error creating package:", error);
+    throw new functions.https.HttpsError(
+      "unknown",
+      error.message || "Error creating package."
+    );
   }
-
-  const companyId = context.auth.token.companyId;
-  const agentId = context.auth.uid;
-
-  if (!companyId || !agentId) {
-    throw new functions.https.HttpsError("failed-precondition", "Missing company or agent information in claims.");
-  }
-
-  const { name, description, price } = data;
-
-  if (!name || typeof name !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Package name is required.");
-  }
-
-  if (!price || typeof price !== "number" || price <= 0) {
-    throw new functions.https.HttpsError("invalid-argument", "Price must be a positive number.");
-  }
-
-  // Generate unique packageId
-  const packageId = uuidv4();
-
-  // Generate unique referralCode for this agent
-  const referralCode = `${agentId.substring(0, 5)}-${Math.random().toString(36).substring(2, 8
+});

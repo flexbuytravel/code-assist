@@ -1,30 +1,59 @@
-import type {Metadata} from 'next';
-import { Toaster } from "@/components/ui/toaster"
-import './globals.css';
-import { AuthProvider } from '@/hooks/use-auth';
+"use client";
 
-export const metadata: Metadata = {
-  title: 'FlexWave Deals',
-  description: 'Your wave to incredible savings.',
-};
+import "./globals.css";
+import { ReactNode, useEffect, useState } from "react";
+import { auth } from "@/lib/firebaseClient";
+import { onAuthStateChanged, getIdTokenResult, signOut } from "firebase/auth";
+import Link from "next/link";
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: ReactNode }) {
+  const [role, setRole] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const token = await getIdTokenResult(user, true);
+          setRole(token.claims.role || null);
+        } catch (err) {
+          console.error("Error fetching claims:", err);
+        }
+      } else {
+        setRole(null);
+      }
+      setLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
+
   return (
     <html lang="en">
-       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet" />
-      </head>
       <body>
-          <AuthProvider>
-            {children}
-            <Toaster />
-          </AuthProvider>
+        <header style={{ padding: "1rem", background: "#eee" }}>
+          <nav style={{ display: "flex", gap: "1rem" }}>
+            <Link href="/">Home</Link>
+
+            {role === "admin" && <Link href="/admin">Admin Dashboard</Link>}
+            {role === "company" && <Link href="/company">Company Dashboard</Link>}
+            {role === "agent" && <Link href="/agent">Agent Dashboard</Link>}
+            {role === "customer" && <Link href="/customer">My Packages</Link>}
+
+            {role ? (
+              <button onClick={handleLogout}>Logout</button>
+            ) : (
+              <Link href="/login">Login</Link>
+            )}
+          </nav>
+        </header>
+
+        <main style={{ padding: "1rem" }}>
+          {loading ? <p>Loading...</p> : children}
+        </main>
       </body>
     </html>
   );

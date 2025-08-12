@@ -1,17 +1,10 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { getFirestore, doc, updateDoc, serverTimestamp } from 'firebase-admin/firestore';
-import { initializeApp, getApps } from 'firebase-admin/app';
 import { buffer } from 'micro';
-
-if (!getApps().length) {
-  initializeApp({
-    credential: require('firebase-admin').credential.applicationDefault(),
-  });
-}
+import admin from '@/lib/firebaseAdmin';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: '2024-06-20',
+  apiVersion: '2024-06-20', // Match your Stripe dashboard API version
 });
 
 export const config = {
@@ -21,54 +14,65 @@ export const config = {
 };
 
 export async function POST(req: Request) {
-  const rawBody = await req.arrayBuffer();
+  const buf = await req.arrayBuffer();
+  const rawBody = Buffer.from(buf);
   const sig = req.headers.get('stripe-signature') as string;
 
   let event: Stripe.Event;
+
   try {
     event = stripe.webhooks.constructEvent(
-      Buffer.from(rawBody),
+      rawBody,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET as string
     );
   } catch (err: any) {
-    console.error('Webhook signature verification failed.', err.message);
-    return NextResponse.json({ error: 'Webhook Error' }, { status: 400 });
+    console.error(`Webhook signature verification failed: ${err.message}`);
+    return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
-  const db = getFirestore();
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed':
+        const session = event.data.object as Stripe.Checkout.Session;
 
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object as Stripe.Checkout.Session;
-    const { packageId, paymentType, insurance } = session.metadata as any;
+        // Get custom metadata we sent during checkout
+        const customerId = session.metadata?.customerId;
+        const packageId = session.metadata?.packageId;
+        const paymentType = session.metadata?.paymentType; // "deposit" or "full"
 
-    const packageRef = doc(db, 'packages', packageId);
+        if (customerId && packageId) {
+          const db = admin.firestore();
 
-    let bookingDeadline;
-    let tripsToAdd = 0;
+          // Update payment status in Firestore
+          await db.collection('customers').doc(customerId).update({
+            paymentStatus: 'paid',
+            paymentType,
+            paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
 
-    if (paymentType === 'deposit') {
-      tripsToAdd += 1;
-      bookingDeadline = new Date();
-      bookingDeadline.setMonth(bookingDeadline.getMonth() + 6);
-    } else if (paymentType === 'full') {
-      bookingDeadline = new Date();
-      bookingDeadline.setMonth(bookingDeadline.getMonth() + 54);
+          // If deposit, extend package by 6 months; if full, set to indefinite
+          if (paymentType === 'deposit') {
+            await db.collection('packages').doc(packageId).update({
+              bookingDeadline: admin.firestore.Timestamp.fromDate(
+                new Date(Date.now() + 180 * 24 * 60 * 60 * 1000) // +6 months
+              ),
+            });
+          } else if (paymentType === 'full') {
+            await db.collection('packages').doc(packageId).update({
+              bookingDeadline: null, // No deadline
+            });
+          }
+        }
+        break;
+
+      default:
+        console.log(`Unhandled event type ${event.type}`);
     }
-
-    if (insurance === 'double-up') {
-      tripsToAdd *= 2;
-      bookingDeadline = new Date();
-      bookingDeadline.setMonth(bookingDeadline.getMonth() + 54);
-    }
-
-    await updateDoc(packageRef, {
-      paymentStatus: 'paid',
-      lastPaymentAt: serverTimestamp(),
-      trips: tripsToAdd,
-      bookingDeadline,
-    });
+  } catch (error) {
+    console.error('Error handling webhook:', error);
+    return new NextResponse('Webhook handler failed', { status: 500 });
   }
 
-  return NextResponse.json({ received: true });
+  return new NextResponse('Success', { status: 200 });
 }

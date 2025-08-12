@@ -1,84 +1,73 @@
-import { NextResponse } from "next/server";
-import Stripe from "stripe";
-import { buffer } from "micro";
-import { db } from "@/lib/firebase";
-import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { NextResponse } from 'next/server';
+import Stripe from 'stripe';
+import { getFirestore, doc, updateDoc, serverTimestamp } from 'firebase-admin/firestore';
+import { initializeApp, getApps } from 'firebase-admin/app';
+import { buffer } from 'micro';
+
+if (!getApps().length) {
+  initializeApp({
+    credential: require('firebase-admin').credential.applicationDefault(),
+  });
+}
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: "2024-04-10",
+  apiVersion: '2024-06-20',
 });
 
 export const config = {
   api: {
-    bodyParser: false,
+    bodyParser: false, // Stripe needs raw body
   },
 };
 
 export async function POST(req: Request) {
-  const sig = req.headers.get("stripe-signature");
-
-  if (!sig) {
-    return NextResponse.json({ error: "Missing Stripe signature" }, { status: 400 });
-  }
+  const rawBody = await req.arrayBuffer();
+  const sig = req.headers.get('stripe-signature') as string;
 
   let event: Stripe.Event;
-  const buf = Buffer.from(await req.arrayBuffer());
-
   try {
     event = stripe.webhooks.constructEvent(
-      buf,
+      Buffer.from(rawBody),
       sig,
       process.env.STRIPE_WEBHOOK_SECRET as string
     );
   } catch (err: any) {
-    console.error("Webhook signature verification failed:", err.message);
-    return NextResponse.json({ error: "Webhook signature verification failed" }, { status: 400 });
+    console.error('Webhook signature verification failed.', err.message);
+    return NextResponse.json({ error: 'Webhook Error' }, { status: 400 });
   }
 
-  if (event.type === "checkout.session.completed") {
+  const db = getFirestore();
+
+  if (event.type === 'checkout.session.completed') {
     const session = event.data.object as Stripe.Checkout.Session;
-    const metadata = session.metadata || {};
+    const { packageId, paymentType, insurance } = session.metadata as any;
 
-    const packageId = metadata.packageId;
-    const paymentType = metadata.paymentType;
-    const insurance = metadata.insurance === "true";
+    const packageRef = doc(db, 'packages', packageId);
 
-    if (packageId) {
-      const pkgRef = doc(db, "packages", packageId);
+    let bookingDeadline;
+    let tripsToAdd = 0;
 
-      // Default: trips = 1, no timer
-      let trips = 1;
-      let expiresAt: Date | null = null;
-
-      if (paymentType === "deposit") {
-        trips += 1; // Deposit adds 1 trip
-        expiresAt = new Date();
-        expiresAt.setMonth(expiresAt.getMonth() + 6); // 6-month expiration
-      } else if (paymentType === "full") {
-        trips = 3; // Example: base trips for full payment
-        expiresAt = null; // No timer for full payment
-      }
-
-      // Insurance doubles trips
-      if (insurance) {
-        trips *= 2;
-        if (paymentType === "deposit") {
-          expiresAt = new Date();
-          expiresAt.setMonth(expiresAt.getMonth() + 54); // 54 months for deposit + insurance
-        }
-      }
-
-      await updateDoc(pkgRef, {
-        paid: true,
-        paymentType,
-        insurance,
-        trips,
-        expiresAt: expiresAt ? expiresAt.getTime() : null,
-        updatedAt: serverTimestamp(),
-      });
-
-      console.log(`✅ Package ${packageId} updated after payment`);
+    if (paymentType === 'deposit') {
+      tripsToAdd += 1;
+      bookingDeadline = new Date();
+      bookingDeadline.setMonth(bookingDeadline.getMonth() + 6);
+    } else if (paymentType === 'full') {
+      bookingDeadline = new Date();
+      bookingDeadline.setMonth(bookingDeadline.getMonth() + 54);
     }
+
+    if (insurance === 'double-up') {
+      tripsToAdd *= 2;
+      bookingDeadline = new Date();
+      bookingDeadline.setMonth(bookingDeadline.getMonth() + 54);
+    }
+
+    await updateDoc(packageRef, {
+      paymentStatus: 'paid',
+      lastPaymentAt: serverTimestamp(),
+      trips: tripsToAdd,
+      bookingDeadline,
+    });
   }
 
   return NextResponse.json({ received: true });

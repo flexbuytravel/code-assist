@@ -1,46 +1,50 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
 
+// Use your Stripe Secret Key (Test Mode)
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: "2024-06-20",
+  apiVersion: "2024-06-20"
 });
 
-export async function POST(req: NextRequest) {
+export async function POST(request: Request) {
   try {
-    const body = await req.json();
-    const { customerId, packageId, price, successUrl, cancelUrl } = body;
-
-    if (!customerId || !packageId || !price) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    const { customerId, packageId } = await request.json();
+    if (!customerId || !packageId) {
+      return NextResponse.json({ error: "Missing customerId or packageId" }, { status: 400 });
     }
+
+    // Get package data to ensure correct price
+    const pkgSnap = await getDoc(doc(db, "packages", packageId));
+    if (!pkgSnap.exists()) {
+      return NextResponse.json({ error: "Package not found" }, { status: 404 });
+    }
+    const pkgData = pkgSnap.data();
 
     // Create Stripe Checkout Session
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
-      mode: "payment",
       line_items: [
         {
           price_data: {
             currency: "usd",
             product_data: {
-              name: `Deposit for Package ${packageId}`,
+              name: pkgData.title || "Travel Package"
             },
-            unit_amount: Math.round(price * 100), // Stripe uses cents
+            unit_amount: Math.round(pkgData.price * 100) // price in cents
           },
-          quantity: 1,
-        },
+          quantity: 1
+        }
       ],
-      metadata: {
-        customerId,
-        packageId,
-      },
-      success_url: successUrl || `${process.env.NEXT_PUBLIC_APP_URL}/customer/dashboard?deposit=success`,
-      cancel_url: cancelUrl || `${process.env.NEXT_PUBLIC_APP_URL}/customer/dashboard?deposit=cancelled`,
+      mode: "payment",
+      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/deposit-success?customerId=${customerId}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/dashboard`
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Error creating checkout session:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

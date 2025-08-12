@@ -1,60 +1,59 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { getFirestore, collection, query, where, getDocs } from "firebase/firestore";
-import { getRoleFromClaims, hasRole } from "@/lib/roles";
-import Sidebar from "@/components/layout/Sidebar";
+import { getAuth } from "firebase/auth";
+import { app } from "@/lib/firebase";
 
-export default function CompanyPackages() {
-  const auth = getAuth();
-  const db = getFirestore();
-  const router = useRouter();
+export default function CompanyPackagesPage() {
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
   const [packages, setPackages] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchPackages = async () => {
+    if (!auth.currentUser) return;
+
+    const companyId = auth.currentUser.uid;
+    const packagesRef = collection(db, "packages");
+    const q = query(packagesRef, where("companyId", "==", companyId));
+    const snapshot = await getDocs(q);
+
+    const data = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    setPackages(data);
+    setLoading(false);
+  };
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        router.push("/auth/login");
-        return;
-      }
-      const role = await getRoleFromClaims(currentUser);
-      if (!hasRole({ ...currentUser, role }, "company")) {
-        router.push("/auth/login");
-        return;
-      }
-      const q = query(collection(db, "packages"), where("companyId", "==", currentUser.uid));
-      const snapshot = await getDocs(q);
-      setPackages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsub();
-  }, [auth, db, router]);
+    fetchPackages();
+  }, [auth.currentUser]);
+
+  if (loading) return <p>Loading packages...</p>;
 
   return (
-    <div className="flex min-h-screen bg-gray-100">
-      <Sidebar />
-      <main className="flex-1 p-6">
-        <h1 className="text-2xl font-bold mb-4">Company Packages</h1>
-        <table className="w-full bg-white shadow rounded-lg overflow-hidden">
-          <thead>
-            <tr className="bg-gray-200">
-              <th className="p-3 text-left">Package Name</th>
-              <th className="p-3 text-left">Price</th>
-              <th className="p-3 text-left">Agent</th>
-            </tr>
-          </thead>
-          <tbody>
-            {packages.map(pkg => (
-              <tr key={pkg.id} className="border-b">
-                <td className="p-3">{pkg.name}</td>
-                <td className="p-3">${pkg.price}</td>
-                <td className="p-3">{pkg.agentId}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </main>
+    <div>
+      <h1>Company Packages</h1>
+      {packages.length === 0 && <p>No packages found for your company.</p>}
+      <ul>
+        {packages.map(pkg => (
+          <li key={pkg.id}>
+            <p>Package ID: {pkg.id}</p>
+            <p>Price: ${pkg.price}</p>
+            {pkg.agentId ? (
+              <p>Agent: {pkg.agentName || pkg.agentId}</p>
+            ) : pkg.deletedAgent ? (
+              <p>Agent: [Deleted]</p>
+            ) : (
+              <p>Agent: [Unassigned]</p>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

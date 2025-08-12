@@ -3,79 +3,78 @@ import * as admin from "firebase-admin";
 
 const db = admin.firestore();
 
-/**
- * Cloud Function: createPackage
- * Allows an agent to create a travel package
- * Ensures both agentId and companyId are stored so packages are never orphaned
- */
 export const createPackage = functions.https.onCall(async (data, context) => {
   try {
-    // Auth check
-    if (!context.auth) {
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "User must be authenticated to create a package."
-      );
-    }
-
-    const uid = context.auth.uid;
-    const { name, description, price } = data;
-
-    if (!name || !price) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Package name and price are required."
-      );
-    }
-
-    // Get the agent document
-    const agentDoc = await db.collection("agents").doc(uid).get();
-
-    if (!agentDoc.exists) {
+    // Only agents can create packages
+    if (!context.auth || context.auth.token.role !== "agent") {
       throw new functions.https.HttpsError(
         "permission-denied",
         "Only agents can create packages."
       );
     }
 
-    const agentData = agentDoc.data();
-    if (!agentData || !agentData.companyId) {
+    const { name, description, price } = data;
+    const agentId = context.auth.uid;
+
+    if (!name || typeof name !== "string" || name.trim() === "") {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Package name is required."
+      );
+    }
+
+    if (!price || typeof price !== "number" || price <= 0) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Package price must be a positive number."
+      );
+    }
+
+    // Get agent's companyId
+    const agentDoc = await db.collection("agents").doc(agentId).get();
+    if (!agentDoc.exists) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "Agent is missing a companyId."
+        "Agent profile not found."
+      );
+    }
+
+    const agentData = agentDoc.data();
+    if (!agentData?.companyId) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Agent is not linked to a company."
       );
     }
 
     const companyId = agentData.companyId;
 
-    // Generate referral code (simple random string for now)
-    const referralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+    // Generate referral code
+    const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
 
-    // Create package
+    // Create package document
     const packageRef = db.collection("packages").doc();
-    const packageData = {
-      packageId: packageRef.id,
-      name,
+    await packageRef.set({
+      name: name.trim(),
       description: description || "",
       price,
+      agentId,
+      companyId,
       referralCode,
-      agentId: uid,
-      companyId, // ✅ stored directly
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      status: "active"
-    };
-
-    await packageRef.set(packageData);
+      status: "available",
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
 
     return {
-      message: "Package created successfully.",
-      package: packageData
+      message: "Package created successfully",
+      packageId: packageRef.id,
+      referralCode
     };
   } catch (error: any) {
     console.error("Error creating package:", error);
     throw new functions.https.HttpsError(
       "unknown",
-      error.message || "Error creating package."
+      error.message || "Failed to create package."
     );
   }
 });

@@ -1,53 +1,80 @@
-import { buffer } from "micro";
+import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { db } from "@/lib/firebase";
-import { doc, updateDoc } from "firebase/firestore";
+import * as admin from "firebase-admin";
+
+// Init Firebase Admin (only once)
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.applicationDefault(),
+  });
+}
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2024-04-10", // match your Stripe dashboard version
+});
+
+export async function POST(req: Request) {
+  const sig = req.headers.get("stripe-signature")!;
+  let event: Stripe.Event;
+
+  try {
+    const body = await req.text();
+    event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET!);
+  } catch (err: any) {
+    console.error(`Webhook signature verification failed.`, err.message);
+    return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
+  }
+
+  // Handle event
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
+
+    try {
+      const customerId = session.metadata?.customerId;
+      const packageId = session.metadata?.packageId;
+      const paymentType = session.metadata?.paymentType; // "deposit" | "doubleUp" | "full"
+
+      if (!customerId || !packageId || !paymentType) {
+        throw new Error("Missing required metadata in Stripe session");
+      }
+
+      const packageRef = admin.firestore().collection("customers").doc(customerId);
+
+      // Defaults
+      let tripCount = Number(session.metadata?.baseTripCount) || 1;
+      let expiryDate = new Date();
+
+      // Handle payment types
+      if (paymentType === "deposit") {
+        tripCount += 1;
+        expiryDate.setMonth(expiryDate.getMonth() + 6);
+      } else if (paymentType === "doubleUp") {
+        tripCount *= 2;
+        expiryDate.setMonth(expiryDate.getMonth() + 54);
+      } else if (paymentType === "full") {
+        expiryDate.setMonth(expiryDate.getMonth() + 54);
+      }
+
+      await packageRef.update({
+        paymentStatus: paymentType === "deposit" ? "depositPaid" : "paidInFull",
+        tripCount,
+        expiryDate: expiryDate.toISOString(),
+        paymentAmount: session.amount_total ? session.amount_total / 100 : null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log(`✅ Updated customer ${customerId} with payment info.`);
+    } catch (err) {
+      console.error("❌ Error handling checkout.session.completed", err);
+      return NextResponse.json({ error: "Failed to process payment" }, { status: 500 });
+    }
+  }
+
+  return NextResponse.json({ received: true }, { status: 200 });
+}
 
 export const config = {
   api: {
-    bodyParser: false, // Stripe requires raw body
+    bodyParser: false, // Stripe needs raw body
   },
 };
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-06-20", // use your actual Stripe API version
-});
-
-export default async function handler(req: any, res: any) {
-  if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
-    return res.status(405).end("Method Not Allowed");
-  }
-
-  const sig = req.headers["stripe-signature"]!;
-  let event;
-
-  try {
-    const buf = await buffer(req);
-    event = stripe.webhooks.constructEvent(
-      buf.toString(),
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    );
-  } catch (err: any) {
-    console.error("Webhook signature verification failed:", err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object as Stripe.Checkout.Session;
-    const metadata = session.metadata || {};
-    const customerId = metadata.customerId;
-    const paymentType = metadata.paymentType; // deposit or full
-    const insurance = metadata.insurance === "true";
-
-    console.log(`Processing payment for customer ${customerId}`);
-
-    try {
-      let tripCount = 0;
-      let expiryDate: Date | null = null;
-
-      if (paymentType === "deposit") {
-        tripCount = insurance ? 2 : 1; // deposit gives 1 trip, insurance doubles
-        expiryDate = new Date();
-        expiryDate.setMonth(expiryDate.getMonth() + 6); // +6

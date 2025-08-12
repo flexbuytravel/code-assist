@@ -1,131 +1,93 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
-import { getFirestore, doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { assignRole } from "@/lib/roles";
+import { getFirestore, doc, setDoc } from "firebase/firestore";
+import { app } from "@/lib/firebase";
 
 export default function RegisterPage() {
-  const auth = getAuth();
-  const db = getFirestore();
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const router = useRouter();
 
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
-  const [packageId, setPackageId] = useState("");
-  const [referralId, setReferralId] = useState("");
+  const packageId = searchParams.get("packageId") || "";
+  const referralId = searchParams.get("referralId") || "";
 
-  useEffect(() => {
-    const pkgParam = searchParams.get("packageId");
-    const refParam = searchParams.get("referralId");
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    phone: "",
+    address: ""
+  });
 
-    if (pkgParam) setPackageId(pkgParam);
-    if (refParam) setReferralId(refParam);
-  }, [searchParams]);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleRegister = async () => {
     try {
-      const { user } = await createUserWithEmailAndPassword(
-        auth,
-        email,
-        password
-      );
+      // Create auth account
+      const cred = await createUserWithEmailAndPassword(auth, form.email, form.password);
 
-      await assignRole(user.uid, "customer");
-      await setDoc(doc(db, "customers", user.uid), {
-        name,
-        email,
-        phone,
-        address,
+      // Save customer to Firestore with timerStart
+      await setDoc(doc(db, "customers", cred.user.uid), {
+        ...form,
+        uid: cred.user.uid,
         packageId,
         referralId,
-        claimedAt: serverTimestamp(),
+        timerStart: new Date().toISOString(),
+        createdAt: new Date().toISOString()
       });
 
+      alert("Registration successful! Redirecting to dashboard...");
       router.push("/customer/dashboard");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert(err.message);
     }
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-100">
-      <form
-        onSubmit={handleRegister}
-        className="bg-white p-6 rounded shadow-md w-96"
-      >
-        <h1 className="text-2xl font-bold mb-4">Register</h1>
-        <input
-          type="text"
-          placeholder="Full Name"
-          className="w-full border p-2 rounded mb-4"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
-        <input
-          type="email"
-          placeholder="Email"
-          className="w-full border p-2 rounded mb-4"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          className="w-full border p-2 rounded mb-4"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        <input
-          type="tel"
-          placeholder="Phone Number"
-          className="w-full border p-2 rounded mb-4"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          required
-        />
-        <input
-          type="text"
-          placeholder="Address"
-          className="w-full border p-2 rounded mb-4"
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          required
-        />
-        <input
-          type="text"
-          placeholder="Package ID"
-          className="w-full border p-2 rounded mb-4"
-          value={packageId}
-          disabled={!!searchParams.get("packageId")}
-          onChange={(e) => setPackageId(e.target.value)}
-          required
-        />
-        <input
-          type="text"
-          placeholder="Referral ID"
-          className="w-full border p-2 rounded mb-4"
-          value={referralId}
-          disabled={!!searchParams.get("referralId")}
-          onChange={(e) => setReferralId(e.target.value)}
-          required
-        />
-        <button
-          type="submit"
-          className="w-full bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700"
-        >
-          Register
-        </button>
-      </form>
+    <div>
+      <h1>Customer Registration</h1>
+      <input
+        placeholder="Name"
+        value={form.name}
+        onChange={(e) => setForm({ ...form, name: e.target.value })}
+      />
+      <input
+        placeholder="Email"
+        type="email"
+        value={form.email}
+        onChange={(e) => setForm({ ...form, email: e.target.value })}
+      />
+      <input
+        placeholder="Password"
+        type="password"
+        value={form.password}
+        onChange={(e) => setForm({ ...form, password: e.target.value })}
+      />
+      <input
+        placeholder="Phone"
+        value={form.phone}
+        onChange={(e) => setForm({ ...form, phone: e.target.value })}
+      />
+      <input
+        placeholder="Address"
+        value={form.address}
+        onChange={(e) => setForm({ ...form, address: e.target.value })}
+      />
+      <input
+        placeholder="Package ID"
+        value={packageId}
+        readOnly
+      />
+      <input
+        placeholder="Referral ID"
+        value={referralId}
+        readOnly
+      />
+      <button onClick={handleRegister}>Register</button>
     </div>
   );
 }

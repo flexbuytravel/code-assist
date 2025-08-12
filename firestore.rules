@@ -1,58 +1,97 @@
+// firestore.rules
+
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isAdmin() {
-      return request.auth.token.role == 'admin';
+    // =====================
+    // USERS COLLECTION
+    // =====================
+    match /users/{userId} {
+      allow read: if isAdmin() || isSelf(userId);
+      allow write: if isAdmin();
     }
 
-    function isCompany() {
-      return request.auth.token.role == 'company';
-    }
-
-    function isAgent() {
-      return request.auth.token.role == 'agent';
-    }
-
-    function isCustomer() {
-      return request.auth.token.role == 'customer';
-    }
-
+    // =====================
+    // COMPANIES COLLECTION
+    // =====================
     match /companies/{companyId} {
+      allow read: if isAdmin() || isCompanySelf(companyId);
       allow create: if isAdmin();
-      allow read, update, delete: if isAdmin() || (isCompany() && request.auth.uid == companyId);
+      allow update, delete: if isAdmin();
     }
 
+    // =====================
+    // AGENTS COLLECTION
+    // =====================
     match /agents/{agentId} {
-      allow create: if isCompany() && request.resource.data.companyId == request.auth.uid;
-      allow read, update, delete: if isAdmin() || (isCompany() && resource.data.companyId == request.auth.uid) || (isAgent() && request.auth.uid == agentId);
+      allow read: if isAdmin() || isAgentSelf(agentId) || companyOwnsAgent(agentId);
+      allow create: if isCompany();
+      allow update, delete: if isCompany() && companyOwnsAgent(agentId);
     }
 
+    // =====================
+    // PACKAGES COLLECTION
+    // =====================
     match /packages/{packageId} {
-      // Create: only agents can create, must include their own agentId and a valid companyId
-      allow create: if isAgent()
-        && request.resource.data.agentId == request.auth.uid
-        && request.resource.data.companyId is string
-        && request.resource.data.companyId != "";
+      allow read: if isAdmin() || companyOwnsPackage(packageId) || agentOwnsPackage(packageId);
+      allow create: if isAgent();
+      allow update, delete: if isAgent() && agentOwnsPackage(packageId);
+    }
 
-      // Read: anyone signed in can read packages
-      allow read: if request.auth != null;
+    // =====================
+    // CUSTOMER-PACKAGE CLAIMS
+    // =====================
+    match /claims/{claimId} {
+      allow read, create: if isCustomerSelfClaim(claimId);
+      allow update: if false; // No updates after claim
+    }
 
-      // Update:
-      //  - Only the agent who owns it, the company that owns it, or admin can update
-      //  - Claimed packages cannot have `claimedBy` changed unless admin
-      allow update: if (
-        (isAgent() && resource.data.agentId == request.auth.uid) ||
-        (isCompany() && resource.data.companyId == request.auth.uid) ||
-        isAdmin()
-      )
-      && !(("claimedBy" in resource.data) && (resource.data.claimedBy != request.resource.data.claimedBy) && !isAdmin());
+    // =====================
+    // FUNCTIONS
+    // =====================
+    function isAdmin() {
+      return request.auth.token.role == "admin";
+    }
+    function isCompany() {
+      return request.auth.token.role == "company";
+    }
+    function isAgent() {
+      return request.auth.token.role == "agent";
+    }
+    function isCustomer() {
+      return request.auth.token.role == "customer";
+    }
 
-      // Claim prevention:
-      // Customers can only claim if it's unclaimed
-      allow update: if isCustomer()
-        && !( "claimedBy" in resource.data ) // <-- prevents claiming already claimed package
-        && request.resource.data.claimedBy == request.auth.uid;
+    function isSelf(uid) {
+      return request.auth.uid == uid;
+    }
+
+    function isCompanySelf(companyId) {
+      return isCompany() && request.auth.uid == companyId;
+    }
+
+    function isAgentSelf(agentId) {
+      return isAgent() && request.auth.uid == agentId;
+    }
+
+    function companyOwnsAgent(agentId) {
+      return exists(/databases/$(database)/documents/agents/$(agentId))
+        && get(/databases/$(database)/documents/agents/$(agentId)).data.companyId == request.auth.uid;
+    }
+
+    function companyOwnsPackage(packageId) {
+      return exists(/databases/$(database)/documents/packages/$(packageId))
+        && get(/databases/$(database)/documents/packages/$(packageId)).data.companyId == request.auth.uid;
+    }
+
+    function agentOwnsPackage(packageId) {
+      return exists(/databases/$(database)/documents/packages/$(packageId))
+        && get(/databases/$(database)/documents/packages/$(packageId)).data.agentId == request.auth.uid;
+    }
+
+    function isCustomerSelfClaim(claimId) {
+      return isCustomer() && request.auth.uid == claimId;
     }
   }
 }

@@ -1,78 +1,43 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useAuth } from "@/hooks/useAuth"; // Assuming you have a custom auth hook
 
-export default function CompanySettings() {
+export default function CompanySettingsPage() {
   const [loading, setLoading] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [checking, setChecking] = useState(true);
+  const { user } = useAuth();
 
-  // Check Stripe connection status on page load
-  useEffect(() => {
-    const checkStatus = async () => {
-      try {
-        const res = await fetch("/api/company/stripe/status");
-        const data = await res.json();
-        if (data.connected) {
-          setConnected(true);
-        }
-      } catch (err) {
-        console.error("Error checking Stripe status", err);
-      } finally {
-        setChecking(false);
-      }
-    };
-    checkStatus();
-  }, []);
+  const connectStripe = async () => {
+    if (!user) return alert("You must be logged in");
 
-  const handleConnectStripe = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const res = await fetch("/api/company/stripe/connect", {
+      const res = await fetch("/api/company/stripe/create-account-link", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.uid }),
       });
+
       const data = await res.json();
       if (data.url) {
-        window.location.href = data.url; // Redirect to Stripe onboarding
+        window.location.href = data.url;
       } else {
-        alert(data.error || "Unable to start Stripe onboarding");
+        alert("Error: " + data.error);
       }
     } catch (err) {
-      console.error("Error starting Stripe onboarding", err);
+      console.error(err);
+      alert("Failed to connect Stripe account.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="p-6 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Company Settings</h1>
-
-      <div className="bg-white shadow rounded-lg p-6">
-        <h2 className="text-xl font-semibold mb-4">Stripe Connection</h2>
-
-        {checking ? (
-          <p>Checking connection status...</p>
-        ) : connected ? (
-          <p className="text-green-600 font-semibold">
-            ✅ Your company is connected to Stripe.
-          </p>
-        ) : (
-          <>
-            <p className="mb-4">
-              Connect your company’s Stripe account to start receiving payments
-              directly.
-            </p>
-            <button
-              onClick={handleConnectStripe}
-              disabled={loading}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md"
-            >
-              {loading ? "Connecting..." : "Connect Stripe"}
-            </button>
-          </>
-        )}
-      </div>
+    <div>
+      <h1>Company Settings</h1>
+      <button onClick={connectStripe} disabled={loading}>
+        {loading ? "Connecting to Stripe..." : "Connect Stripe Account"}
+      </button>
     </div>
   );
 }

@@ -1,190 +1,94 @@
+"use client";
 
-'use client';
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { auth, db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
 
-import { usePathname, useRouter } from 'next/navigation';
-import {
-  Bell,
-  Home,
-  LogOut,
-  Settings,
-  Users,
-  Building,
-  Menu,
-  Shield,
-  LayoutDashboard
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
-import Link from 'next/link';
-import { cn } from '@/lib/utils';
-import { useEffect, useState } from 'react';
-import Image from 'next/image';
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [loading, setLoading] = useState(true);
+  const [userData, setUserData] = useState<any>(null);
 
-const NavLink = ({
-  href,
-  icon: Icon,
-  children,
-  pathname,
-}: {
-  href: string;
-  icon: React.ElementType;
-  children: React.ReactNode;
-  pathname: string;
-}) => {
-  const isActive = pathname === href;
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        router.push("/home");
+        return;
+      }
+      try {
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (!userDoc.exists()) {
+          router.push("/home");
+          return;
+        }
+        const data = userDoc.data();
+        if (data.role !== "admin") {
+          router.push("/home");
+          return;
+        }
+        setUserData(data);
+      } catch (err) {
+        console.error("Error loading admin data:", err);
+        router.push("/home");
+      } finally {
+        setLoading(false);
+      }
+    });
+    return () => unsub();
+  }, [router]);
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    router.push("/home");
+  };
+
+  if (loading) {
+    return <div className="p-6">Loading...</div>;
+  }
+
+  return (
+    <div className="flex min-h-screen bg-gray-100">
+      {/* Sidebar */}
+      <aside className="w-64 bg-white shadow-md">
+        <div className="p-4 border-b">
+          <h1 className="text-xl font-bold">Admin Panel</h1>
+          <p className="text-sm text-gray-600">{userData?.email}</p>
+        </div>
+        <nav className="p-4 space-y-2">
+          <SidebarLink href="/admin/dashboard" label="Dashboard" active={pathname === "/admin/dashboard"} />
+          <SidebarLink href="/admin/agents" label="Agents" active={pathname.startsWith("/admin/agents")} />
+          <SidebarLink href="/admin/companies" label="Companies" active={pathname.startsWith("/admin/companies")} />
+          <SidebarLink href="/admin/settings" label="Settings" active={pathname.startsWith("/admin/settings")} />
+        </nav>
+        <div className="p-4 border-t">
+          <button
+            onClick={handleLogout}
+            className="w-full bg-red-600 text-white py-2 rounded hover:bg-red-700 transition"
+          >
+            Logout
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 p-6">{children}</main>
+    </div>
+  );
+}
+
+function SidebarLink({ href, label, active }: { href: string; label: string; active: boolean }) {
   return (
     <Link
       href={href}
-      className={cn(
-        'flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary',
-        isActive && 'bg-secondary text-secondary-foreground font-semibold'
-      )}
+      className={`block px-3 py-2 rounded ${
+        active ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-200"
+      }`}
     >
-      <Icon className="h-4 w-4" />
-      {children}
+      {label}
     </Link>
-  );
-};
-
-export default function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
-  const [isLoading, setIsLoading] = useState(true);
-  const [adminName, setAdminName] = useState('Admin');
-
-  useEffect(() => {
-    const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
-    if (!isAdmin && pathname !== '/admin/login') {
-      router.replace('/admin/login');
-      setIsAuthenticated(false);
-    } else {
-        setIsAuthenticated(true);
-        if (sessionStorage.getItem('adminName')) {
-            setAdminName(sessionStorage.getItem('adminName')!);
-        }
-    }
-    setIsLoading(false);
-  }, [router, pathname]);
-
-  const handleLogout = () => {
-    sessionStorage.removeItem('isAdmin');
-    sessionStorage.removeItem('adminName');
-    router.push('/home');
-  };
-
-  const getPageTitle = () => {
-    const segments = pathname.split('/').filter(Boolean);
-    const lastSegment = segments.pop();
-    if (!lastSegment || lastSegment === 'admin') return 'Dashboard';
-    return lastSegment.charAt(0).toUpperCase() + lastSegment.slice(1);
-  }
-
-  if (pathname === '/admin/login') {
-    return <>{children}</>;
-  }
-
-  if (isLoading || !isAuthenticated) {
-    return <div className="flex items-center justify-center min-h-screen"></div>;
-  }
-
-  return (
-    <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
-      <div className="hidden border-r bg-card md:block">
-        <div className="flex h-full max-h-screen flex-col gap-2">
-          <div className="flex h-14 items-center border-b px-4 lg:h-[60px] lg:px-6">
-            <Link href="/admin/dashboard" className="flex items-center gap-2 font-semibold text-primary">
-              <Image src="/logo2.png" alt="FlexBuy Logo" width={32} height={32} data-ai-hint="logo wave" />
-              <span className="font-headline">FlexBuy Admin</span>
-            </Link>
-          </div>
-          <div className="flex-1">
-            <nav className="grid items-start px-2 text-sm font-medium lg:px-4">
-              <NavLink href="/admin/dashboard" pathname={pathname} icon={LayoutDashboard}>
-                Dashboard
-              </NavLink>
-              <NavLink href="/admin/companies" pathname={pathname} icon={Building}>
-                Company Management
-              </NavLink>
-              <NavLink href="/admin/settings" pathname={pathname} icon={Settings}>
-                Settings
-              </NavLink>
-            </nav>
-          </div>
-           <div className="mt-auto p-4">
-               <nav className="grid items-start px-2 text-sm font-medium lg:px-4">
-               <button
-                  onClick={handleLogout}
-                  className='flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary w-full text-left'
-                >
-                  <LogOut className="h-4 w-4" />
-                  Logout
-                </button>
-             </nav>
-          </div>
-        </div>
-      </div>
-      <div className="flex flex-col">
-        <header className="flex h-14 items-center gap-4 border-b bg-card px-4 lg:h-[60px] lg:px-6">
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button variant="outline" size="icon" className="shrink-0 md:hidden">
-                <Menu className="h-5 w-5" />
-                <span className="sr-only">Toggle navigation menu</span>
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="flex flex-col">
-                <SheetHeader>
-                    <SheetTitle>
-                        <Link href="/admin/dashboard" className="flex items-center gap-2 text-lg font-semibold text-primary">
-                            <Image src="/logo2.png" alt="FlexBuy Logo" width={32} height={32} data-ai-hint="logo wave"/>
-                            <span>FlexBuy Admin</span>
-                        </Link>
-                    </SheetTitle>
-                </SheetHeader>
-              <nav className="grid gap-2 text-lg font-medium">
-                <NavLink href="/admin/dashboard" pathname={pathname} icon={LayoutDashboard}>
-                    Dashboard
-                </NavLink>
-                <NavLink href="/admin/companies" pathname={pathname} icon={Building}>
-                    Company Management
-                </NavLink>
-                <NavLink href="/admin/settings" pathname={pathname} icon={Settings}>
-                    Settings
-                </NavLink>
-              </nav>
-               <div className="mt-auto">
-                 <nav className="grid items-start text-lg font-medium">
-                    <button
-                        onClick={handleLogout}
-                        className='flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary w-full text-left'
-                        >
-                        <LogOut className="h-4 w-4" />
-                        Logout
-                    </button>
-                </nav>
-              </div>
-            </SheetContent>
-          </Sheet>
-          <div className="w-full flex-1">
-             <h1 className="text-xl font-semibold">{getPageTitle()}</h1>
-          </div>
-            <div className="flex items-center gap-2">
-                <span>{adminName}</span>
-                <Button variant="outline" size="icon">
-                    <Bell className="h-4 w-4" />
-                    <span className="sr-only">Notifications</span>
-                </Button>
-            </div>
-        </header>
-        <main className="flex flex-1 flex-col gap-4 p-4 md:gap-8 md:p-8 bg-background/80">
-          {children}
-        </main>
-      </div>
-    </div>
   );
 }

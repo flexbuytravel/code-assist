@@ -1,104 +1,155 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getAuth } from "firebase/auth";
-import {
-  getFirestore,
-  collection,
-  getDocs,
-  query,
-  where,
-  deleteDoc,
-  updateDoc,
-  doc
-} from "firebase/firestore";
-import { app } from "@/lib/firebase";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { auth, db } from "@/lib/firebase";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
 export default function AdminCompaniesPage() {
-  const auth = getAuth(app);
-  const db = getFirestore(app);
+  const router = useRouter();
 
-  const [companies, setCompanies] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+  });
 
-  // Fetch all companies
-  const fetchCompanies = async () => {
-    const companiesRef = collection(db, "companies");
-    const snapshot = await getDocs(companiesRef);
+  const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const [loading, setLoading] = useState(false);
 
-    const data = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+  const validate = () => {
+    const newErrors: { [key: string]: string } = {};
 
-    setCompanies(data);
-    setLoading(false);
+    if (!form.name.trim()) {
+      newErrors.name = "Company name is required.";
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      newErrors.email = "Invalid email format.";
+    }
+
+    if (!form.password) {
+      newErrors.password = "Password is required.";
+    } else if (form.password.length < 8) {
+      newErrors.password = "Password must be at least 8 characters.";
+    } else if (!/[A-Z]/.test(form.password)) {
+      newErrors.password = "Password must contain an uppercase letter.";
+    } else if (!/\d/.test(form.password)) {
+      newErrors.password = "Password must contain a number.";
+    }
+
+    if (form.password !== form.confirmPassword) {
+      newErrors.confirmPassword = "Passwords do not match.";
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
-  useEffect(() => {
-    fetchCompanies();
-  }, []);
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+  };
 
-  // Safe-delete company with agent + package cleanup
-  const deleteCompany = async (companyId: string) => {
-    if (!confirm("Are you sure you want to delete this company? All its agents will be removed, but packages will remain linked to the company.")) {
-      return;
-    }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validate()) return;
 
     try {
-      // Step 1: Find all agents in this company
-      const agentsRef = collection(db, "agents");
-      const agentsQuery = query(agentsRef, where("companyId", "==", companyId));
-      const agentsSnapshot = await getDocs(agentsQuery);
+      setLoading(true);
 
-      // Step 2: For each agent, clean up packages
-      for (const agentDoc of agentsSnapshot.docs) {
-        const agentId = agentDoc.id;
+      // Create auth user
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        form.email,
+        form.password
+      );
 
-        // Find packages linked to this agent
-        const packagesRef = collection(db, "packages");
-        const pkgQuery = query(packagesRef, where("agentId", "==", agentId));
-        const pkgSnapshot = await getDocs(pkgQuery);
+      const companyId = userCredential.user.uid;
 
-        // Nullify agentId but keep companyId
-        for (const pkg of pkgSnapshot.docs) {
-          await updateDoc(pkg.ref, {
-            agentId: null,
-            deletedAgent: true
-          });
-        }
+      // Store company in Firestore
+      await setDoc(doc(db, "companies", companyId), {
+        name: form.name,
+        email: form.email,
+        role: "company",
+        createdAt: serverTimestamp(),
+      });
 
-        // Delete the agent document
-        await deleteDoc(doc(db, "agents", agentId));
-      }
-
-      // Step 3: Delete the company document
-      await deleteDoc(doc(db, "companies", companyId));
-
-      // Step 4: Update UI
-      setCompanies(prev => prev.filter(company => company.id !== companyId));
-
-      alert("Company and its agents deleted successfully. Packages remain linked to the company.");
-    } catch (err) {
-      console.error("Error deleting company:", err);
-      alert("Error deleting company. Please try again.");
+      router.push("/admin/companies");
+    } catch (error: any) {
+      console.error(error);
+      setErrors({ firebase: error.message || "Failed to create company." });
+    } finally {
+      setLoading(false);
     }
   };
 
-  if (loading) return <p>Loading companies...</p>;
-
   return (
-    <div>
-      <h1>Admin Companies</h1>
-      {companies.length === 0 && <p>No companies found.</p>}
-      <ul>
-        {companies.map(company => (
-          <li key={company.id}>
-            {company.name} ({company.email})
-            <button onClick={() => deleteCompany(company.id)}>Delete</button>
-          </li>
-        ))}
-      </ul>
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
+      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-md">
+        <h2 className="mb-6 text-center text-2xl font-bold">Create Company</h2>
+        {errors.firebase && (
+          <p className="mb-4 text-sm text-red-500">{errors.firebase}</p>
+        )}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input
+            type="text"
+            name="name"
+            placeholder="Company Name"
+            value={form.name}
+            onChange={handleChange}
+            className="w-full rounded border p-2"
+          />
+          {errors.name && (
+            <p className="text-sm text-red-500">{errors.name}</p>
+          )}
+
+          <input
+            type="email"
+            name="email"
+            placeholder="Email"
+            value={form.email}
+            onChange={handleChange}
+            className="w-full rounded border p-2"
+          />
+          {errors.email && (
+            <p className="text-sm text-red-500">{errors.email}</p>
+          )}
+
+          <input
+            type="password"
+            name="password"
+            placeholder="Password"
+            value={form.password}
+            onChange={handleChange}
+            className="w-full rounded border p-2"
+          />
+          {errors.password && (
+            <p className="text-sm text-red-500">{errors.password}</p>
+          )}
+
+          <input
+            type="password"
+            name="confirmPassword"
+            placeholder="Confirm Password"
+            value={form.confirmPassword}
+            onChange={handleChange}
+            className="w-full rounded border p-2"
+          />
+          {errors.confirmPassword && (
+            <p className="text-sm text-red-500">{errors.confirmPassword}</p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded bg-blue-600 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {loading ? "Creating..." : "Create Company"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

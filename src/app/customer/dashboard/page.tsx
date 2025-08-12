@@ -1,117 +1,94 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
-export default function CustomerDashboardPage() {
-  const router = useRouter();
-  const [packageId, setPackageId] = useState<string>('');
-  const [packageName, setPackageName] = useState<string>('');
-  const [basePrice, setBasePrice] = useState<number>(0);
+export default function CustomerDashboard({ customerId, packageId, basePrice }: { customerId: string; packageId: string; basePrice: number }) {
+  const [loading, setLoading] = useState(false);
   const [paymentType, setPaymentType] = useState<'deposit' | 'full'>('deposit');
-  const [insurance, setInsurance] = useState<'none' | 'double-up'>('none');
-  const [totalPrice, setTotalPrice] = useState<number>(0);
+  const [includeInsurance, setIncludeInsurance] = useState(false);
 
-  useEffect(() => {
-    // Fetch package data from Firestore (or server)
-    async function fetchPackage() {
-      const res = await fetch(`/api/customer/package-data`);
-      const data = await res.json();
-      setPackageId(data.id);
-      setPackageName(data.name);
-      setBasePrice(data.price);
+  const calculatePrice = () => {
+    let price = paymentType === 'deposit' ? 200 : basePrice; // deposit = $200, full = basePrice
+    if (includeInsurance) {
+      price += paymentType === 'deposit' ? 400 : 600; // insurance adds cost
     }
-    fetchPackage();
-  }, []);
-
-  useEffect(() => {
-    let price = 0;
-    if (paymentType === 'deposit') {
-      price = 200; // $200 deposit
-    } else if (paymentType === 'full') {
-      price = basePrice; // full package price
-    }
-
-    if (insurance === 'double-up') {
-      price += 600; // insurance add-on
-    }
-
-    setTotalPrice(price);
-  }, [paymentType, insurance, basePrice]);
+    return price;
+  };
 
   const handlePayment = async () => {
+    setLoading(true);
     try {
       const res = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId, paymentType, insurance }),
+        body: JSON.stringify({
+          customerId,
+          packageId,
+          price: calculatePrice(),
+          paymentType,
+        }),
       });
+
       const data = await res.json();
       if (data.url) {
-        window.location.href = data.url;
+        window.location.href = data.url; // Redirect to Stripe Checkout
       } else {
-        alert('Failed to create checkout session.');
+        alert('Payment session could not be created.');
       }
     } catch (err) {
       console.error(err);
-      alert('Something went wrong starting payment.');
+      alert('Error starting payment.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="p-6 max-w-lg mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Customer Dashboard</h1>
+    <div className="p-6">
+      <h1 className="text-2xl font-bold">Your Package</h1>
 
-      <div className="bg-white shadow rounded p-4">
-        <h2 className="text-lg font-semibold mb-2">{packageName}</h2>
-        <p>Base Price: ${basePrice}</p>
+      <div className="mt-4">
+        <label className="mr-4">
+          <input
+            type="radio"
+            checked={paymentType === 'deposit'}
+            onChange={() => setPaymentType('deposit')}
+          />{' '}
+          Pay Deposit ($200)
+        </label>
 
-        <div className="mt-4">
-          <label className="block mb-2 font-semibold">Choose Payment Type:</label>
-          <div>
-            <label className="inline-flex items-center mr-4">
-              <input
-                type="radio"
-                checked={paymentType === 'deposit'}
-                onChange={() => setPaymentType('deposit')}
-              />
-              <span className="ml-2">Deposit ($200)</span>
-            </label>
-            <label className="inline-flex items-center">
-              <input
-                type="radio"
-                checked={paymentType === 'full'}
-                onChange={() => setPaymentType('full')}
-              />
-              <span className="ml-2">Full Payment (${basePrice})</span>
-            </label>
-          </div>
-        </div>
-
-        <div className="mt-4">
-          <label className="inline-flex items-center">
-            <input
-              type="checkbox"
-              checked={insurance === 'double-up'}
-              onChange={() =>
-                setInsurance(insurance === 'double-up' ? 'none' : 'double-up')
-              }
-            />
-            <span className="ml-2">Add Double-Up Insurance (+$600)</span>
-          </label>
-        </div>
-
-        <div className="mt-4 font-bold text-lg">
-          Total: ${totalPrice}
-        </div>
-
-        <button
-          onClick={handlePayment}
-          className="mt-6 w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
-        >
-          Pay Now
-        </button>
+        <label>
+          <input
+            type="radio"
+            checked={paymentType === 'full'}
+            onChange={() => setPaymentType('full')}
+          />{' '}
+          Pay in Full (${basePrice})
+        </label>
       </div>
+
+      <div className="mt-4">
+        <label>
+          <input
+            type="checkbox"
+            checked={includeInsurance}
+            onChange={() => setIncludeInsurance(!includeInsurance)}
+          />{' '}
+          Add Trip Insurance {paymentType === 'deposit' ? '(+$400)' : '(+$600)'}
+        </label>
+      </div>
+
+      <p className="mt-4 text-lg font-semibold">
+        Total: ${calculatePrice()}
+      </p>
+
+      <button
+        onClick={handlePayment}
+        disabled={loading}
+        className="mt-6 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+      >
+        {loading ? 'Processing...' : 'Proceed to Payment'}
+      </button>
     </div>
   );
 }

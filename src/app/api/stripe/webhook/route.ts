@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { getFirestore } from "firebase-admin/firestore";
-import { stripeSecretKey, stripeWebhookSecret } from "@/lib/stripeConfig";
+import { buffer } from "micro";
+import { db } from "@/lib/firebase";
+import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 
-const stripe = new Stripe(stripeSecretKey, { apiVersion: "2024-04-10" });
-const db = getFirestore();
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+  apiVersion: "2024-04-10",
+});
+
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
 
 export async function POST(req: Request) {
   const sig = req.headers.get("stripe-signature");
@@ -14,45 +22,63 @@ export async function POST(req: Request) {
   }
 
   let event: Stripe.Event;
+  const buf = Buffer.from(await req.arrayBuffer());
 
   try {
-    const rawBody = await req.text();
-    event = stripe.webhooks.constructEvent(rawBody, sig, stripeWebhookSecret);
+    event = stripe.webhooks.constructEvent(
+      buf,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET as string
+    );
   } catch (err: any) {
-    console.error("Webhook signature error:", err.message);
+    console.error("Webhook signature verification failed:", err.message);
     return NextResponse.json({ error: "Webhook signature verification failed" }, { status: 400 });
   }
 
-  try {
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object as Stripe.Checkout.Session;
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
+    const metadata = session.metadata || {};
 
-      const { packageId, customerId, depositOnly } = session.metadata || {};
+    const packageId = metadata.packageId;
+    const paymentType = metadata.paymentType;
+    const insurance = metadata.insurance === "true";
 
-      if (!packageId || !customerId) {
-        console.warn("Missing metadata in Stripe session");
-        return NextResponse.json({ received: true });
+    if (packageId) {
+      const pkgRef = doc(db, "packages", packageId);
+
+      // Default: trips = 1, no timer
+      let trips = 1;
+      let expiresAt: Date | null = null;
+
+      if (paymentType === "deposit") {
+        trips += 1; // Deposit adds 1 trip
+        expiresAt = new Date();
+        expiresAt.setMonth(expiresAt.getMonth() + 6); // 6-month expiration
+      } else if (paymentType === "full") {
+        trips = 3; // Example: base trips for full payment
+        expiresAt = null; // No timer for full payment
       }
 
-      // Mark payment as completed in Firestore
-      const packageRef = db.collection("packages").doc(packageId);
+      // Insurance doubles trips
+      if (insurance) {
+        trips *= 2;
+        if (paymentType === "deposit") {
+          expiresAt = new Date();
+          expiresAt.setMonth(expiresAt.getMonth() + 54); // 54 months for deposit + insurance
+        }
+      }
 
-      await packageRef.update({
-        sold: true,
-        soldTo: customerId,
-        paymentStatus: depositOnly ? "deposit_paid" : "paid_in_full",
-        depositPaidAt: depositOnly ? new Date() : null,
-        fullyPaidAt: !depositOnly ? new Date() : null,
-        expiresAt: depositOnly
-          ? new Date(Date.now() + 180 * 24 * 60 * 60 * 1000) // 6 months for deposit
-          : null, // no expiration if fully paid
+      await updateDoc(pkgRef, {
+        paid: true,
+        paymentType,
+        insurance,
+        trips,
+        expiresAt: expiresAt ? expiresAt.getTime() : null,
+        updatedAt: serverTimestamp(),
       });
 
-      console.log(`Package ${packageId} updated for customer ${customerId}`);
+      console.log(`✅ Package ${packageId} updated after payment`);
     }
-  } catch (err: any) {
-    console.error("Error handling Stripe webhook:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });

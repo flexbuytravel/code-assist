@@ -2,107 +2,166 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getAuth, createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { getFirestore, doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
-import { app } from "@/lib/firebase";
+import { auth, firestore } from "@/lib/firebase";
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 
 export default function RegisterPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const auth = getAuth(app);
-  const db = getFirestore(app);
+  const packageIdFromLink = searchParams.get("packageId");
+  const referralIdFromLink = searchParams.get("referralId");
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
-  const [packageId, setPackageId] = useState("");
-  const [referralId, setReferralId] = useState("");
-
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
-  // Pre-fill from query params
+  const [packageData, setPackageData] = useState<any>(null);
+
+  // If link contains packageId + referralId, fetch package info
   useEffect(() => {
-    const pkg = searchParams.get("packageId");
-    const ref = searchParams.get("referralId");
+    const fetchPackage = async () => {
+      if (packageIdFromLink && referralIdFromLink) {
+        const pkgRef = doc(firestore, "packages", packageIdFromLink);
+        const pkgSnap = await getDoc(pkgRef);
 
-    if (pkg) setPackageId(pkg);
-    if (ref) setReferralId(ref);
-  }, [searchParams]);
+        if (pkgSnap.exists()) {
+          setPackageData(pkgSnap.data());
+        } else {
+          setError("Invalid package link");
+        }
+      }
+    };
+    fetchPackage();
+  }, [packageIdFromLink, referralIdFromLink]);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
+    setError(null);
     setLoading(true);
 
     try {
-      // Create user in Firebase Auth
+      // Create auth user
       const userCred = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCred.user;
+      const uid = userCred.user.uid;
 
-      await updateProfile(user, { displayName: name });
-
-      // Fetch package to link customer to company
-      let companyId = null;
-      if (packageId) {
-        const pkgRef = doc(db, "packages", packageId);
-        const pkgSnap = await getDoc(pkgRef);
-
-        if (!pkgSnap.exists()) {
-          throw new Error("Package not found.");
-        }
-
-        const pkgData = pkgSnap.data();
-        companyId = pkgData.companyId || null;
-
-        // Attach claimTimestamp to package
-        await updateDoc(pkgRef, {
-          claimedBy: user.uid,
-          claimTimestamp: new Date().toISOString()
-        });
+      // Calculate 48-hour expiry if claiming package
+      let expiresAt = null;
+      if (packageIdFromLink && referralIdFromLink) {
+        const expiryDate = new Date();
+        expiryDate.setHours(expiryDate.getHours() + 48);
+        expiresAt = expiryDate.toISOString();
       }
 
-      // Create customer record with 48h default
-      await setDoc(doc(db, "customers", user.uid), {
+      // Save to Firestore
+      const customerDoc: any = {
+        uid,
         name,
         email,
         phone,
         address,
-        packageId: packageId || null,
-        referralId: referralId || null,
-        companyId: companyId || null,
-        deletedAgent: false,
-        depositPaid: false,
-        depositTimestamp: null,
-        claimTimestamp: new Date().toISOString(),
-        createdAt: new Date().toISOString()
-      });
+        role: "customer",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      if (packageIdFromLink && referralIdFromLink && packageData) {
+        customerDoc.packageId = packageIdFromLink;
+        customerDoc.referralId = referralIdFromLink;
+        customerDoc.agentId = packageData.agentId;
+        customerDoc.companyId = packageData.companyId;
+        customerDoc.expiresAt = expiresAt;
+        customerDoc.depositPaid = false;
+        customerDoc.fullyPaid = false;
+      }
+
+      await setDoc(doc(firestore, "customers", uid), customerDoc);
 
       router.push("/customer/dashboard");
     } catch (err: any) {
-      console.error("Registration error:", err);
-      setError(err.message || "Registration failed.");
+      console.error(err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div>
-      <h1>Register</h1>
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      <form onSubmit={handleRegister}>
-        <input type="text" placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} required />
-        <input type="email" placeholder="Email Address" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        <input type="tel" placeholder="Phone Number" value={phone} onChange={(e) => setPhone(e.target.value)} required />
-        <input type="text" placeholder="Address" value={address} onChange={(e) => setAddress(e.target.value)} required />
-        <input type="text" placeholder="Package ID" value={packageId} onChange={(e) => setPackageId(e.target.value)} readOnly={!!searchParams.get("packageId")} />
-        <input type="text" placeholder="Referral ID" value={referralId} onChange={(e) => setReferralId(e.target.value)} readOnly={!!searchParams.get("referralId")} />
-        <button type="submit" disabled={loading}>{loading ? "Registering..." : "Register"}</button>
+    <div className="max-w-md mx-auto p-6">
+      <h1 className="text-2xl font-bold mb-4">Register</h1>
+      {error && <p className="text-red-600">{error}</p>}
+
+      <form onSubmit={handleRegister} className="space-y-4">
+        <input
+          type="text"
+          placeholder="Full Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full p-2 border rounded"
+          required
+        />
+        <input
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full p-2 border rounded"
+          required
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="w-full p-2 border rounded"
+          required
+        />
+        <input
+          type="tel"
+          placeholder="Phone Number"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          className="w-full p-2 border rounded"
+          required
+        />
+        <input
+          type="text"
+          placeholder="Address"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          className="w-full p-2 border rounded"
+          required
+        />
+
+        {packageIdFromLink && referralIdFromLink && (
+          <>
+            <input
+              type="text"
+              value={packageIdFromLink}
+              readOnly
+              className="w-full p-2 border rounded bg-gray-100"
+            />
+            <input
+              type="text"
+              value={referralIdFromLink}
+              readOnly
+              className="w-full p-2 border rounded bg-gray-100"
+            />
+          </>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+        >
+          {loading ? "Registering..." : "Register"}
+        </button>
       </form>
     </div>
   );

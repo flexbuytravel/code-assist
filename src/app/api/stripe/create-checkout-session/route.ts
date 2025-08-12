@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { firestore } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2023-10-16",
@@ -7,15 +9,56 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
 
 export async function POST(req: Request) {
   try {
-    const { packageId, customerId, paymentType } = await req.json();
+    const { customerId, paymentType, insurance } = await req.json();
 
-    if (!packageId || !customerId || !paymentType) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
+    if (!customerId || !paymentType) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
+    // Fetch customer from Firestore
+    const customerRef = doc(firestore, "customers", customerId);
+    const customerSnap = await getDoc(customerRef);
+
+    if (!customerSnap.exists()) {
+      return NextResponse.json({ error: "Customer not found" }, { status: 404 });
+    }
+
+    const customerData = customerSnap.data();
+    if (!customerData.packageId) {
+      return NextResponse.json({ error: "Customer has no package assigned" }, { status: 400 });
+    }
+
+    // Fetch package to get price + trip count
+    const packageRef = doc(firestore, "packages", customerData.packageId);
+    const packageSnap = await getDoc(packageRef);
+
+    if (!packageSnap.exists()) {
+      return NextResponse.json({ error: "Package not found" }, { status: 404 });
+    }
+
+    const packageData = packageSnap.data();
+    const baseTripPrice = packageData.tripPrice || 0;
+    let tripCount = packageData.tripCount || 1;
+
+    // Apply insurance multiplier
+    if (insurance) {
+      tripCount *= 2; // doubles number of trips
+    }
+
+    // Calculate total package price
+    let totalPackagePrice = baseTripPrice * tripCount;
+
+    // Apply deposit fraction if deposit payment
+    let finalPriceInCents: number;
+    if (paymentType === "deposit") {
+      finalPriceInCents = Math.round(totalPackagePrice * 0.2 * 100);
+    } else if (paymentType === "full") {
+      finalPriceInCents = Math.round(totalPackagePrice * 100);
+    } else {
+      return NextResponse.json({ error: "Invalid payment type" }, { status: 400 });
+    }
+
+    // Create Stripe checkout session
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
@@ -24,29 +67,29 @@ export async function POST(req: Request) {
           price_data: {
             currency: "usd",
             product_data: {
-              name:
-                paymentType === "deposit"
-                  ? "Package Deposit"
-                  : "Full Package Payment",
+              name: `Travel Package (${tripCount} trips)`,
+              description: insurance
+                ? "Includes trip insurance (double trips)"
+                : "No trip insurance",
             },
-            // Amount should be dynamically fetched from package details
-            unit_amount: paymentType === "deposit" ? 5000 : 20000, // example: $50 deposit or $200 full
+            unit_amount: finalPriceInCents,
           },
           quantity: 1,
         },
       ],
+      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/dashboard?payment=success`,
+      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/dashboard?payment=cancel`,
       metadata: {
-        packageId,
         customerId,
-        paymentType, // "deposit" or "full"
+        packageId: customerData.packageId,
+        paymentType,
+        insurance: insurance ? "true" : "false",
       },
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/customer/dashboard?payment=success`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/customer/dashboard?payment=cancelled`,
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (err: any) {
-    console.error("Stripe session creation error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error) {
+    console.error("Stripe session creation error:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

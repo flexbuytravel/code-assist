@@ -1,78 +1,68 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { getAuth } from "firebase/auth";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
-import { getRoleFromClaims, hasRole } from "@/lib/roles";
-import Sidebar from "@/components/layout/Sidebar";
+import { app } from "@/lib/firebase";
 
 export default function CustomerDashboard() {
-  const auth = getAuth();
-  const db = getFirestore();
-  const router = useRouter();
-  const [customer, setCustomer] = useState<any>(null);
-  const [timeLeft, setTimeLeft] = useState<string>("");
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+  const [remainingTime, setRemainingTime] = useState<string>("");
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        router.push("/auth/login");
-        return;
-      }
-      const role = await getRoleFromClaims(currentUser);
-      if (!hasRole({ ...currentUser, role }, "customer")) {
-        router.push("/auth/login");
-        return;
-      }
+    const fetchTimer = async () => {
+      if (!auth.currentUser) return;
 
-      const customerDoc = await getDoc(doc(db, "customers", currentUser.uid));
-      if (customerDoc.exists()) {
-        const data = customerDoc.data();
-        setCustomer(data);
-        if (data.claimedAt) {
-          startCountdown(new Date(data.claimedAt.seconds * 1000));
+      const docRef = doc(db, "customers", auth.currentUser.uid);
+      const snapshot = await getDoc(docRef);
+
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.timerStart) {
+          const startTime = new Date(data.timerStart).getTime();
+          const expiryTime = startTime + 48 * 60 * 60 * 1000; // 48 hours
+
+          const updateCountdown = () => {
+            const now = Date.now();
+            const diff = expiryTime - now;
+
+            if (diff <= 0) {
+              setRemainingTime("00:00:00");
+              return;
+            }
+
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+            setRemainingTime(
+              `${hours.toString().padStart(2, "0")}:${minutes
+                .toString()
+                .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+            );
+          };
+
+          updateCountdown();
+          const interval = setInterval(updateCountdown, 1000);
+          return () => clearInterval(interval);
         }
       }
-    });
-    return () => unsub();
-  }, [auth, db, router]);
+    };
 
-  const startCountdown = (claimedAt: Date) => {
-    const deadline = new Date(claimedAt.getTime() + 48 * 60 * 60 * 1000);
-    const interval = setInterval(() => {
-      const now = new Date().getTime();
-      const diff = deadline.getTime() - now;
-      if (diff <= 0) {
-        clearInterval(interval);
-        setTimeLeft("Expired");
-      } else {
-        const hours = Math.floor(diff / (1000 * 60 * 60));
-        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-        setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
-      }
-    }, 1000);
-  };
+    fetchTimer();
+  }, [auth.currentUser]);
 
   return (
-    <div className="flex min-h-screen bg-gray-100">
-      <Sidebar />
-      <main className="flex-1 p-6">
-        <h1 className="text-2xl font-bold mb-4">Customer Dashboard</h1>
-        {customer && (
-          <>
-            <p>Welcome, {customer.name}</p>
-            {timeLeft && (
-              <div className="mt-4 p-4 bg-yellow-100 rounded border border-yellow-300">
-                <p className="font-semibold">
-                  Time left to purchase: {timeLeft}
-                </p>
-              </div>
-            )}
-          </>
-        )}
-      </main>
+    <div>
+      <h1>Customer Dashboard</h1>
+      {remainingTime && (
+        <div>
+          <h2>Time left to purchase:</h2>
+          <p>{remainingTime}</p>
+        </div>
+      )}
     </div>
   );
 }

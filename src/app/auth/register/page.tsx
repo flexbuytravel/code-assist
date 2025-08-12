@@ -1,93 +1,158 @@
 "use client";
 
-import { useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
-import { getFirestore, doc, setDoc } from "firebase/firestore";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getAuth, createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { getFirestore, doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
 import { app } from "@/lib/firebase";
 
 export default function RegisterPage() {
-  const searchParams = useSearchParams();
   const router = useRouter();
-
-  const packageId = searchParams.get("packageId") || "";
-  const referralId = searchParams.get("referralId") || "";
-
-  const [form, setForm] = useState({
-    name: "",
-    email: "",
-    password: "",
-    phone: "",
-    address: ""
-  });
+  const searchParams = useSearchParams();
 
   const auth = getAuth(app);
   const db = getFirestore(app);
 
-  const handleRegister = async () => {
-    try {
-      // Create auth account
-      const cred = await createUserWithEmailAndPassword(auth, form.email, form.password);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [packageId, setPackageId] = useState("");
+  const [referralId, setReferralId] = useState("");
 
-      // Save customer to Firestore with timerStart
-      await setDoc(doc(db, "customers", cred.user.uid), {
-        ...form,
-        uid: cred.user.uid,
-        packageId,
-        referralId,
-        timerStart: new Date().toISOString(),
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  // Pre-fill from query params
+  useEffect(() => {
+    const pkg = searchParams.get("packageId");
+    const ref = searchParams.get("referralId");
+
+    if (pkg) setPackageId(pkg);
+    if (ref) setReferralId(ref);
+  }, [searchParams]);
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      // Create user in Firebase Auth
+      const userCred = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCred.user;
+
+      // Set displayName for convenience
+      await updateProfile(user, { displayName: name });
+
+      // If claiming a package, fetch it
+      let companyId = null;
+      if (packageId) {
+        const pkgRef = doc(db, "packages", packageId);
+        const pkgSnap = await getDoc(pkgRef);
+
+        if (!pkgSnap.exists()) {
+          throw new Error("Package not found.");
+        }
+
+        const pkgData = pkgSnap.data();
+        companyId = pkgData.companyId || null;
+
+        // Attach claimTimestamp (48-hour timer start)
+        await updateDoc(pkgRef, {
+          claimedBy: user.uid,
+          claimTimestamp: new Date().toISOString()
+        });
+      }
+
+      // Create customer record
+      await setDoc(doc(db, "customers", user.uid), {
+        name,
+        email,
+        phone,
+        address,
+        packageId: packageId || null,
+        referralId: referralId || null,
+        companyId: companyId || null,
+        deletedAgent: false,
         createdAt: new Date().toISOString()
       });
 
-      alert("Registration successful! Redirecting to dashboard...");
       router.push("/customer/dashboard");
     } catch (err: any) {
-      console.error(err);
-      alert(err.message);
+      console.error("Registration error:", err);
+      setError(err.message || "Registration failed.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div>
-      <h1>Customer Registration</h1>
-      <input
-        placeholder="Name"
-        value={form.name}
-        onChange={(e) => setForm({ ...form, name: e.target.value })}
-      />
-      <input
-        placeholder="Email"
-        type="email"
-        value={form.email}
-        onChange={(e) => setForm({ ...form, email: e.target.value })}
-      />
-      <input
-        placeholder="Password"
-        type="password"
-        value={form.password}
-        onChange={(e) => setForm({ ...form, password: e.target.value })}
-      />
-      <input
-        placeholder="Phone"
-        value={form.phone}
-        onChange={(e) => setForm({ ...form, phone: e.target.value })}
-      />
-      <input
-        placeholder="Address"
-        value={form.address}
-        onChange={(e) => setForm({ ...form, address: e.target.value })}
-      />
-      <input
-        placeholder="Package ID"
-        value={packageId}
-        readOnly
-      />
-      <input
-        placeholder="Referral ID"
-        value={referralId}
-        readOnly
-      />
-      <button onClick={handleRegister}>Register</button>
+      <h1>Register</h1>
+      {error && <p style={{ color: "red" }}>{error}</p>}
+      <form onSubmit={handleRegister}>
+        <input
+          type="text"
+          placeholder="Full Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
+
+        <input
+          type="email"
+          placeholder="Email Address"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+        />
+
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
+
+        <input
+          type="tel"
+          placeholder="Phone Number"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          required
+        />
+
+        <input
+          type="text"
+          placeholder="Address"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          required
+        />
+
+        <input
+          type="text"
+          placeholder="Package ID"
+          value={packageId}
+          onChange={(e) => setPackageId(e.target.value)}
+          readOnly={!!searchParams.get("packageId")}
+        />
+
+        <input
+          type="text"
+          placeholder="Referral ID"
+          value={referralId}
+          onChange={(e) => setReferralId(e.target.value)}
+          readOnly={!!searchParams.get("referralId")}
+        />
+
+        <button type="submit" disabled={loading}>
+          {loading ? "Registering..." : "Register"}
+        </button>
+      </form>
     </div>
   );
 }

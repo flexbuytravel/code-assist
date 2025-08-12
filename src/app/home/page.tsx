@@ -1,83 +1,79 @@
-"use client";
+'use client';
 
-import { useRouter, useSearchParams } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { getPackageById } from '@/app/api/packages/getPackageById';
+import { Loader } from '@/components/Loader';
 
 export default function HomePage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const router = useRouter();
 
-  const [packageId, setPackageId] = useState("");
-  const [referralCode, setReferralCode] = useState("");
-  const [isPrefilled, setIsPrefilled] = useState(false);
-  const [error, setError] = useState("");
+  const [packageId, setPackageId] = useState('');
+  const [referralCode, setReferralCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [packageData, setPackageData] = useState<any>(null);
 
-  // Prefill from link
+  // Pre-fill from URL if provided
   useEffect(() => {
-    const pkg = searchParams.get("packageId");
-    const ref = searchParams.get("referralCode");
-    if (pkg && ref) {
-      setPackageId(pkg);
-      setReferralCode(ref);
-      setIsPrefilled(true);
+    const urlPackageId = searchParams.get('packageId') || '';
+    const urlReferralCode = searchParams.get('referralCode') || '';
+    if (urlPackageId && urlReferralCode) {
+      setPackageId(urlPackageId);
+      setReferralCode(urlReferralCode);
     }
   }, [searchParams]);
 
   const handleLoadPackage = async () => {
-    setError("");
-
-    if (!packageId || !referralCode) {
-      setError("Please enter both Package ID and Referral Code.");
-      return;
-    }
-
+    setError('');
+    setLoading(true);
     try {
-      // Optional: Check if package is valid before proceeding
-      const res = await fetch(`/api/packages/validate?packageId=${packageId}&referralCode=${referralCode}`);
-      const data = await res.json();
-
-      if (!res.ok || !data.valid) {
-        setError("Invalid Package ID or Referral Code.");
+      const data = await getPackageById(packageId, referralCode);
+      if (!data) {
+        setError('Invalid package or referral code.');
+        setLoading(false);
         return;
       }
-
-      // Redirect to register with package details
+      setPackageData(data);
       router.push(`/auth/register?packageId=${packageId}&referralCode=${referralCode}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError("Error loading package. Please try again.");
+      setError('Error loading package.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-md mx-auto mt-10 p-6 bg-white rounded shadow">
-      <h1 className="text-2xl font-bold mb-4">Claim Your Package</h1>
+    <div className="flex flex-col items-center justify-center p-6">
+      <h1 className="text-3xl font-bold mb-4">Claim Your Package</h1>
 
-      <label className="block mb-2">Package ID</label>
       <input
         type="text"
+        placeholder="Package ID"
         value={packageId}
         onChange={(e) => setPackageId(e.target.value)}
-        disabled={isPrefilled}
-        className="w-full border p-2 rounded mb-4"
+        className="border p-2 mb-2 w-64"
+        disabled={!!searchParams.get('packageId')}
       />
-
-      <label className="block mb-2">Referral Code</label>
       <input
         type="text"
+        placeholder="Referral Code"
         value={referralCode}
         onChange={(e) => setReferralCode(e.target.value)}
-        disabled={isPrefilled}
-        className="w-full border p-2 rounded mb-4"
+        className="border p-2 mb-2 w-64"
+        disabled={!!searchParams.get('referralCode')}
       />
 
-      {error && <p className="text-red-500 mb-4">{error}</p>}
+      {error && <p className="text-red-500">{error}</p>}
 
       <button
         onClick={handleLoadPackage}
-        className="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700"
+        disabled={loading}
+        className="bg-blue-600 text-white px-4 py-2 rounded"
       >
-        Load Package
+        {loading ? 'Loading...' : 'Load Package'}
       </button>
     </div>
   );

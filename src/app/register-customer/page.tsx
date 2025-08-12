@@ -26,7 +26,7 @@ export default function RegisterCustomerPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Load package data on mount
+  // Load package data
   useEffect(() => {
     if (!packageId) {
       setError("No package ID provided.");
@@ -71,7 +71,7 @@ export default function RegisterCustomerPage() {
       const userCred = await createUserWithEmailAndPassword(auth, form.email, form.password);
       const uid = userCred.user.uid;
 
-      // Create customer document linked to package/agent/company
+      // Create customer document
       await setDoc(doc(db, "customers", uid), {
         name: form.name,
         email: form.email,
@@ -84,19 +84,12 @@ export default function RegisterCustomerPage() {
         createdAt: new Date()
       });
 
-      // Call backend to claim the package
+      // Claim the package (backend will set claimStartTime)
       const claimFn = httpsCallable(functions, "claimPackage");
       await claimFn({ packageId });
 
-      // Create Stripe Checkout session
-      const checkoutFn = httpsCallable(functions, "createCheckoutSession");
-      const sessionRes: any = await checkoutFn({ packageId });
-      const sessionId = sessionRes.data.id;
-
-      if (!sessionId) throw new Error("Failed to create checkout session.");
-
-      // Redirect to Stripe Checkout
-      window.location.href = `https://checkout.stripe.com/pay/${sessionId}`;
+      // Redirect to dashboard (where timer will be shown)
+      router.push("/customer-dashboard");
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Registration failed.");
@@ -159,13 +152,15 @@ export default function RegisterCustomerPage() {
           className="border rounded p-2 w-full mb-4"
         />
 
-        <button
-          onClick={handleRegister}
-          disabled={loading}
-          className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 w-full"
-        >
-          {loading ? "Registering..." : "Register & Pay"}
-        </button>
+        {!pkgData?.claimedBy && (
+          <button
+            onClick={handleRegister}
+            disabled={loading}
+            className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 w-full"
+          >
+            {loading ? "Registering..." : "Register & Claim Package"}
+          </button>
+        )}
       </div>
     </div>
   );

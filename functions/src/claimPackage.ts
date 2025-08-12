@@ -1,46 +1,79 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 
-admin.initializeApp();
+const db = admin.firestore();
 
-/**
- * Trigger when a user document is created or updated
- * This function updates Firebase Auth custom claims with:
- * - role (admin, company, agent, customer)
- * - companyId (if applicable)
- * - agentId (if applicable)
- */
-export const setUserClaims = functions.firestore
-  .document("users/{userId}")
-  .onWrite(async (change, context) => {
-    const userId = context.params.userId;
-    const afterData = change.after.exists ? change.after.data() : null;
-
-    if (!afterData) {
-      console.log(`User ${userId} deleted — skipping claims update.`);
-      return null;
+export const claimPackage = functions.https.onCall(async (data, context) => {
+  try {
+    // Only customers can claim packages
+    if (!context.auth || context.auth.token.role !== "customer") {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "Only customers can claim packages."
+      );
     }
 
-    const { role, companyId, agentId } = afterData;
+    const { packageId } = data;
+    const customerId = context.auth.uid; // ✅ Always use logged-in customer
 
-    if (!role) {
-      console.error(`User ${userId} has no role assigned — cannot set claims.`);
-      return null;
+    if (!packageId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Package ID is required."
+      );
     }
 
-    const claims: { role: string; companyId?: string; agentId?: string } = {
-      role,
-    };
+    // Transaction to prevent double-claim
+    await db.runTransaction(async (transaction) => {
+      const packageRef = db.collection("packages").doc(packageId);
+      const packageSnap = await transaction.get(packageRef);
 
-    if (companyId) claims.companyId = companyId;
-    if (agentId) claims.agentId = agentId;
+      if (!packageSnap.exists) {
+        throw new functions.https.HttpsError(
+          "not-found",
+          "Package not found."
+        );
+      }
 
-    try {
-      await admin.auth().setCustomUserClaims(userId, claims);
-      console.log(`Custom claims set for user ${userId}:`, claims);
-    } catch (error) {
-      console.error(`Error setting claims for user ${userId}:`, error);
-    }
+      const pkgData = packageSnap.data();
 
-    return null;
-  });
+      // Already claimed?
+      if (pkgData?.claimedBy) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "This package has already been claimed."
+        );
+      }
+
+      // Lock package to this customer
+      transaction.update(packageRef, {
+        claimedBy: customerId,
+        claimedAt: admin.firestore.FieldValue.serverTimestamp(),
+        status: "claimed"
+      });
+
+      // Optionally create a "customerPackages" reference
+      const customerPkgRef = db
+        .collection("customers")
+        .doc(customerId)
+        .collection("claimedPackages")
+        .doc(packageId);
+
+      transaction.set(customerPkgRef, {
+        packageId,
+        companyId: pkgData.companyId,
+        agentId: pkgData.agentId,
+        price: pkgData.price,
+        claimedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    });
+
+    return { message: "Package claimed successfully", packageId };
+  } catch (error: any) {
+    console.error("Error claiming package:", error);
+    throw new functions.https.HttpsError(
+      "unknown",
+      error.message || "Failed to claim package."
+    );
+  }
+});

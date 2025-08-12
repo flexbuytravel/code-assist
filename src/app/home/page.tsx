@@ -1,56 +1,91 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { getFirestore, doc, getDoc } from "firebase/firestore";
+import { app } from "@/lib/firebase";
 
 export default function HomePage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
+  const db = getFirestore(app);
 
-  const linkPackageId = searchParams.get("packageId") || "";
-  const linkReferralId = searchParams.get("referralId") || "";
+  const [packageId, setPackageId] = useState("");
+  const [packageData, setPackageData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const [packageId, setPackageId] = useState(linkPackageId);
-  const [referralId, setReferralId] = useState(linkReferralId);
+  // Auto-fill if link contains packageId
+  useEffect(() => {
+    const pkgFromLink = searchParams.get("packageId");
+    if (pkgFromLink) {
+      setPackageId(pkgFromLink);
+      fetchPackage(pkgFromLink);
+    }
+  }, [searchParams]);
 
-  const isPrefilled = !!linkPackageId && !!linkReferralId;
+  // Fetch package details
+  const fetchPackage = async (pkgId: string) => {
+    setLoading(true);
+    setError("");
 
-  const handleLoadPackage = () => {
-    if (!packageId || !referralId) {
-      alert("Please enter both Package ID and Referral ID.");
-      return;
+    try {
+      const pkgRef = doc(db, "packages", pkgId);
+      const snapshot = await getDoc(pkgRef);
+
+      if (!snapshot.exists()) {
+        setPackageData(null);
+        setError("Package not found.");
+      } else {
+        setPackageData(snapshot.data());
+      }
+    } catch (err) {
+      console.error("Error fetching package:", err);
+      setError("Failed to fetch package details.");
     }
 
-    // Send to register page with both IDs in query
-    router.push(`/auth/register?packageId=${packageId}&referralId=${referralId}`);
+    setLoading(false);
+  };
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!packageId.trim()) return;
+    fetchPackage(packageId.trim());
   };
 
   return (
     <div>
-      <h1>Claim Your Package</h1>
-      <p>Enter your package details to continue.</p>
-
-      <div>
-        <label>Package ID</label>
+      <h1>Claim a Package</h1>
+      <form onSubmit={handleSearch}>
         <input
           type="text"
+          placeholder="Enter Package ID"
           value={packageId}
           onChange={(e) => setPackageId(e.target.value)}
-          readOnly={isPrefilled}
+          disabled={!!searchParams.get("packageId")}
         />
-      </div>
+        {!searchParams.get("packageId") && <button type="submit">Load Package</button>}
+      </form>
 
-      <div>
-        <label>Referral ID</label>
-        <input
-          type="text"
-          value={referralId}
-          onChange={(e) => setReferralId(e.target.value)}
-          readOnly={isPrefilled}
-        />
-      </div>
+      {loading && <p>Loading package...</p>}
+      {error && <p style={{ color: "red" }}>{error}</p>}
 
-      <button onClick={handleLoadPackage}>Load Package</button>
+      {packageData && (
+        <div>
+          <h2>Package Details</h2>
+          <p>Package ID: {packageId}</p>
+          <p>Price: ${packageData.price}</p>
+
+          {packageData.agentId ? (
+            <p>Agent: {packageData.agentName || packageData.agentId}</p>
+          ) : packageData.deletedAgent ? (
+            <p>Agent: [Deleted]</p>
+          ) : (
+            <p>Agent: [Unassigned]</p>
+          )}
+
+          {packageData.companyId && <p>Company ID: {packageData.companyId}</p>}
+        </div>
+      )}
     </div>
   );
 }

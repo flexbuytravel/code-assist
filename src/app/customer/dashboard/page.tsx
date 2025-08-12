@@ -1,187 +1,155 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import { db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { useAuth } from "@/hooks/useAuth";
+import { useRouter } from "next/navigation";
+import axios from "axios";
 
 export default function CustomerDashboard() {
-  const searchParams = useSearchParams();
+  const { user, loading } = useAuth();
   const router = useRouter();
 
   const [packageData, setPackageData] = useState<any>(null);
-  const [paymentType, setPaymentType] = useState<"deposit" | "full">("deposit");
-  const [insurance, setInsurance] = useState<"none" | "standard" | "doubleUp">(
-    "none"
-  );
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [insurance, setInsurance] = useState(false);
+  const [paymentType, setPaymentType] = useState<"deposit" | "double" | "full" | null>(null);
+  const [price, setPrice] = useState(0);
+  const [error, setError] = useState("");
 
-  const packageId = searchParams.get("packageId");
-
-  // Load package details
   useEffect(() => {
-    if (!packageId) return;
+    if (!loading && !user) {
+      router.push("/auth/login");
+    }
+  }, [loading, user, router]);
 
-    const fetchPackage = async () => {
-      try {
-        const ref = doc(db, "packages", packageId);
-        const snap = await getDoc(ref);
-
-        if (snap.exists()) {
-          const data = snap.data();
-          setPackageData(data);
-        }
-      } catch (err) {
-        console.error("Error loading package:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchPackage();
-  }, [packageId]);
-
-  // Update total price
   useEffect(() => {
-    if (!packageData) return;
-
-    let price = 0;
-
-    if (paymentType === "deposit") {
-      price = 200;
-    } else {
-      price = packageData.price || 0;
+    if (user) {
+      fetchPackageData();
     }
+  }, [user]);
 
-    if (insurance === "standard") {
-      price += 200;
-    } else if (insurance === "doubleUp") {
-      price += 600;
-    }
-
-    setTotal(price);
-  }, [packageData, paymentType, insurance]);
-
-  // Start Stripe checkout
-  const handleCheckout = async () => {
+  const fetchPackageData = async () => {
     try {
-      const res = await fetch("/api/stripe/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packageId, paymentType, insurance }),
-      });
-
-      const data = await res.json();
-
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        alert("Error starting checkout.");
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Something went wrong.");
+      const res = await axios.get(`/api/customers/package`);
+      setPackageData(res.data);
+    } catch (err: any) {
+      setError(err.response?.data?.error || "Failed to load package");
     }
   };
 
-  if (loading) return <p>Loading package...</p>;
-  if (!packageData) return <p>Package not found.</p>;
+  const calculatePrice = () => {
+    if (!packageData) return;
+
+    let base = 0;
+
+    if (paymentType === "deposit") base = 200;
+    if (paymentType === "double") base = 600;
+    if (paymentType === "full") base = packageData.remainingBalance;
+
+    if (insurance) {
+      // Insurance doubles trips but does not change price for deposit/double
+      // You could add cost logic here if insurance had a cost
+    }
+
+    setPrice(base);
+  };
+
+  useEffect(() => {
+    calculatePrice();
+  }, [paymentType, insurance, packageData]);
+
+  const handlePayment = async () => {
+    if (!paymentType) {
+      setError("Please choose a payment option.");
+      return;
+    }
+
+    try {
+      const res = await axios.post("/api/payments/checkout", {
+        paymentType,
+        insurance,
+      });
+      window.location.href = res.data.url; // Stripe redirect
+    } catch (err: any) {
+      setError(err.response?.data?.error || "Failed to initiate payment");
+    }
+  };
+
+  if (loading || !packageData) {
+    return <p className="text-center mt-6">Loading dashboard...</p>;
+  }
 
   return (
-    <div className="max-w-2xl mx-auto p-6 bg-white rounded shadow">
-      <h1 className="text-2xl font-bold mb-4">Customer Dashboard</h1>
+    <div className="max-w-3xl mx-auto mt-8 p-6 border rounded-lg shadow">
+      <h1 className="text-2xl font-bold mb-4">Your Travel Package</h1>
 
-      {searchParams.get("success") && (
-        <div className="bg-green-100 p-3 mb-4 text-green-700">
-          ✅ Payment successful! You can now book your trips.
+      {error && <p className="text-red-500">{error}</p>}
+
+      <div className="mb-6">
+        <p><strong>Package ID:</strong> {packageData.id}</p>
+        <p><strong>Trips Included:</strong> {packageData.trips}</p>
+        <p><strong>Price Remaining:</strong> ${packageData.remainingBalance}</p>
+        {packageData.bookingDeadline && (
+          <p><strong>Booking Deadline:</strong> {new Date(packageData.bookingDeadline).toLocaleDateString()}</p>
+        )}
+        <p><strong>Status:</strong> {packageData.status}</p>
+      </div>
+
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold mb-2">Choose Payment Option</h2>
+        <div className="space-y-2">
+          <label className="flex items-center space-x-2">
+            <input
+              type="radio"
+              name="paymentType"
+              value="deposit"
+              checked={paymentType === "deposit"}
+              onChange={() => setPaymentType("deposit")}
+            />
+            <span>Pay Deposit ($200) - Adds 1 Trip, +6 months booking</span>
+          </label>
+          <label className="flex items-center space-x-2">
+            <input
+              type="radio"
+              name="paymentType"
+              value="double"
+              checked={paymentType === "double"}
+              onChange={() => setPaymentType("double")}
+            />
+            <span>Double Up ($600) - Doubles Trips, +54 months booking</span>
+          </label>
+          <label className="flex items-center space-x-2">
+            <input
+              type="radio"
+              name="paymentType"
+              value="full"
+              checked={paymentType === "full"}
+              onChange={() => setPaymentType("full")}
+            />
+            <span>Pay Full Amount - Removes Timer</span>
+          </label>
         </div>
-      )}
-
-      {searchParams.get("canceled") && (
-        <div className="bg-red-100 p-3 mb-4 text-red-700">
-          ❌ Payment canceled.
-        </div>
-      )}
-
-      <div className="mb-4">
-        <h2 className="font-semibold">Package Name:</h2>
-        <p>{packageData.name}</p>
       </div>
 
       <div className="mb-4">
-        <h2 className="font-semibold">Base Price:</h2>
-        <p>${packageData.price}</p>
-      </div>
-
-      <div className="mb-4">
-        <h2 className="font-semibold">Payment Type:</h2>
-        <label className="block">
+        <label className="flex items-center space-x-2">
           <input
-            type="radio"
-            name="paymentType"
-            value="deposit"
-            checked={paymentType === "deposit"}
-            onChange={() => setPaymentType("deposit")}
-          />{" "}
-          Pay Deposit ($200)
-        </label>
-        <label className="block">
-          <input
-            type="radio"
-            name="paymentType"
-            value="full"
-            checked={paymentType === "full"}
-            onChange={() => setPaymentType("full")}
-          />{" "}
-          Pay in Full (${packageData.price})
+            type="checkbox"
+            checked={insurance}
+            onChange={(e) => setInsurance(e.target.checked)}
+          />
+          <span>Add Trip Insurance - Doubles Trips</span>
         </label>
       </div>
 
-      <div className="mb-4">
-        <h2 className="font-semibold">Insurance:</h2>
-        <label className="block">
-          <input
-            type="radio"
-            name="insurance"
-            value="none"
-            checked={insurance === "none"}
-            onChange={() => setInsurance("none")}
-          />{" "}
-          No Insurance
-        </label>
-        <label className="block">
-          <input
-            type="radio"
-            name="insurance"
-            value="standard"
-            checked={insurance === "standard"}
-            onChange={() => setInsurance("standard")}
-          />{" "}
-          Standard Insurance (+$200)
-        </label>
-        <label className="block">
-          <input
-            type="radio"
-            name="insurance"
-            value="doubleUp"
-            checked={insurance === "doubleUp"}
-            onChange={() => setInsurance("doubleUp")}
-          />{" "}
-          Double Up (+$600)
-        </label>
-      </div>
-
-      <div className="mb-4">
-        <h2 className="font-semibold">Total:</h2>
-        <p className="text-xl font-bold">${total}</p>
+      <div className="mb-6">
+        <p className="text-lg font-bold">Total: ${price}</p>
       </div>
 
       <button
-        onClick={handleCheckout}
-        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        onClick={handlePayment}
+        className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
       >
-        Pay Now
+        Proceed to Payment
       </button>
     </div>
   );

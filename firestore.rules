@@ -1,63 +1,83 @@
-// Firestore security rules for FlexBuyTravel
+// Firestore Security Rules for FlexBuy Travel
 
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Allow read for all authenticated users
-    match /{document=**} {
-      allow read: if request.auth != null;
+    // =========================
+    // USER DOCUMENTS
+    // =========================
+    match /users/{userId} {
+      allow read: if request.auth != null && (
+        request.auth.token.role == 'admin' ||
+        request.auth.uid == userId
+      );
+
+      allow create: if request.auth != null;
+      allow update: if request.auth.uid == userId || request.auth.token.role == 'admin';
+      allow delete: if request.auth.token.role == 'admin';
     }
 
-    // ADMIN access
-    match /admins/{adminId} {
-      allow read, write: if request.auth.token.role == "admin";
-    }
-
+    // =========================
     // COMPANIES
+    // =========================
     match /companies/{companyId} {
       allow read: if request.auth != null;
-      allow write: if request.auth.token.role == "admin";
+      allow create, update, delete: if request.auth.token.role == 'admin';
     }
 
+    // =========================
     // AGENTS
-    match /agents/{agentId} {
+    // =========================
+    match /companies/{companyId}/agents/{agentId} {
       allow read: if request.auth != null;
-      allow create, update, delete:
-        if request.auth.token.role == "company";
+      allow create, update, delete: if request.auth.token.role == 'company' &&
+        request.auth.token.companyId == companyId;
     }
 
+    // =========================
     // PACKAGES
-    match /packages/{packageId} {
+    // =========================
+    match /companies/{companyId}/packages/{packageId} {
       allow read: if request.auth != null;
 
-      // Company or Agent that owns the package can write
-      allow write: if (
-        request.auth.token.role == "company" ||
-        request.auth.token.role == "agent"
+      // Agents of the company can create packages
+      allow create: if request.auth.token.role == 'agent' &&
+        request.auth.token.companyId == companyId;
+
+      // Update rules
+      allow update: if (
+        // Agent of company can update before it's claimed
+        (request.auth.token.role == 'agent' &&
+         request.auth.token.companyId == companyId &&
+         !resource.data.claimed) ||
+
+        // Only Stripe webhook (server) can mark deposit/full paid
+        (request.auth.token.role == 'server') ||
+
+        // Admin can override
+        request.auth.token.role == 'admin'
       );
+
+      // Delete only by admin or company
+      allow delete: if request.auth.token.role in ['admin', 'company'] &&
+        request.auth.token.companyId == companyId;
     }
 
-    // CUSTOMERS
-    match /customers/{customerId} {
+    // =========================
+    // CLAIMED PACKAGES (Customer Flow)
+    // =========================
+    match /customers/{customerId}/claimedPackages/{packageId} {
       allow read: if request.auth != null && request.auth.uid == customerId;
 
-      // Customers can only update certain fields when registering
-      allow update: if request.auth.uid == customerId &&
-        (
-          // Allow updating contact details
-          (request.resource.data.keys().hasOnly(['name', 'phone', 'address', 'email']) &&
-           !('depositPaid' in request.resource.data) &&
-           !('fullyPaid' in request.resource.data) &&
-           !('expiresAt' in request.resource.data) &&
-           !('lastPaymentAt' in request.resource.data) &&
-           !('insurance' in request.resource.data))
-        );
-    }
+      // Only server (Stripe webhook) can create after payment
+      allow create: if request.auth.token.role == 'server';
 
-    // Only backend (Cloud Functions or Webhook) can set payment flags
-    match /customers/{customerId} {
-      allow update: if request.auth.token.isStripeWebhook == true;
+      // Customer cannot update claimed status manually
+      allow update: if false;
+
+      // Delete by admin only
+      allow delete: if request.auth.token.role == 'admin';
     }
   }
 }

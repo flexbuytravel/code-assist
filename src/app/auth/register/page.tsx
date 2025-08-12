@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import Link from "next/link";
 
 export default function RegisterPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const packageIdFromLink = searchParams.get("packageId") || "";
+  const referralIdFromLink = searchParams.get("referralId") || "";
 
   const [form, setForm] = useState({
     name: "",
@@ -18,62 +20,59 @@ export default function RegisterPage() {
     confirmPassword: "",
     phone: "",
     address: "",
-    packageId: "",
-    referralId: "",
+    packageId: packageIdFromLink,
+    referralId: referralIdFromLink,
   });
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    const pkg = searchParams.get("packageId") || "";
-    const ref = searchParams.get("referralId") || "";
-    if (pkg || ref) {
-      setForm((prev) => ({
-        ...prev,
-        packageId: pkg,
-        referralId: ref,
-      }));
-    }
-  }, [searchParams]);
-
   const validate = () => {
     const newErrors: { [key: string]: string } = {};
 
-    if (!form.name.trim()) newErrors.name = "Name is required.";
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
+    if (!form.name.trim()) {
+      newErrors.name = "Name is required.";
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
       newErrors.email = "Invalid email format.";
-    if (!form.password)
+    }
+
+    if (!form.password) {
       newErrors.password = "Password is required.";
-    else if (form.password.length < 8)
+    } else if (form.password.length < 8) {
       newErrors.password = "Password must be at least 8 characters.";
-    else if (!/[A-Z]/.test(form.password))
+    } else if (!/[A-Z]/.test(form.password)) {
       newErrors.password = "Password must contain an uppercase letter.";
-    else if (!/\d/.test(form.password))
+    } else if (!/\d/.test(form.password)) {
       newErrors.password = "Password must contain a number.";
+    }
 
-    if (form.password !== form.confirmPassword)
+    if (form.password !== form.confirmPassword) {
       newErrors.confirmPassword = "Passwords do not match.";
+    }
 
-    if (!/^\+?\d{10,15}$/.test(form.phone))
-      newErrors.phone = "Invalid phone number.";
+    if (!form.phone.trim()) {
+      newErrors.phone = "Phone number is required.";
+    }
 
-    if (!form.address.trim())
+    if (!form.address.trim()) {
       newErrors.address = "Address is required.";
+    }
 
-    if (!form.packageId.trim())
+    if (!form.packageId.trim()) {
       newErrors.packageId = "Package ID is required.";
+    }
 
-    if (!form.referralId.trim())
+    if (!form.referralId.trim()) {
       newErrors.referralId = "Referral ID is required.";
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
@@ -83,29 +82,32 @@ export default function RegisterPage() {
 
     try {
       setLoading(true);
+
+      // Create auth user
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         form.email,
         form.password
       );
-      const user = userCredential.user;
 
-      await setDoc(doc(db, "users", user.uid), {
-        uid: user.uid,
-        role: "customer",
+      const customerId = userCredential.user.uid;
+
+      // Store customer in Firestore
+      await setDoc(doc(db, "customers", customerId), {
         name: form.name,
         email: form.email,
         phone: form.phone,
         address: form.address,
         packageId: form.packageId,
         referralId: form.referralId,
+        role: "customer",
         createdAt: serverTimestamp(),
       });
 
       router.push("/customer/dashboard");
     } catch (error: any) {
       console.error(error);
-      setErrors({ firebase: error.message });
+      setErrors({ firebase: error.message || "Registration failed." });
     } finally {
       setLoading(false);
     }
@@ -114,9 +116,7 @@ export default function RegisterPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
       <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-md">
-        <h2 className="mb-6 text-center text-2xl font-bold">
-          Create Your Account
-        </h2>
+        <h2 className="mb-6 text-center text-2xl font-bold">Customer Registration</h2>
         {errors.firebase && (
           <p className="mb-4 text-sm text-red-500">{errors.firebase}</p>
         )}
@@ -159,7 +159,9 @@ export default function RegisterPage() {
             onChange={handleChange}
             className="w-full rounded border p-2"
           />
-          {errors.confirmPassword && <p className="text-sm text-red-500">{errors.confirmPassword}</p>}
+          {errors.confirmPassword && (
+            <p className="text-sm text-red-500">{errors.confirmPassword}</p>
+          )}
 
           <input
             type="text"
@@ -179,7 +181,9 @@ export default function RegisterPage() {
             onChange={handleChange}
             className="w-full rounded border p-2"
           />
-          {errors.address && <p className="text-sm text-red-500">{errors.address}</p>}
+          {errors.address && (
+            <p className="text-sm text-red-500">{errors.address}</p>
+          )}
 
           <input
             type="text"
@@ -187,10 +191,12 @@ export default function RegisterPage() {
             placeholder="Package ID"
             value={form.packageId}
             onChange={handleChange}
+            disabled={!!packageIdFromLink}
             className="w-full rounded border p-2"
-            disabled={!!searchParams.get("packageId")}
           />
-          {errors.packageId && <p className="text-sm text-red-500">{errors.packageId}</p>}
+          {errors.packageId && (
+            <p className="text-sm text-red-500">{errors.packageId}</p>
+          )}
 
           <input
             type="text"
@@ -198,25 +204,21 @@ export default function RegisterPage() {
             placeholder="Referral ID"
             value={form.referralId}
             onChange={handleChange}
+            disabled={!!referralIdFromLink}
             className="w-full rounded border p-2"
-            disabled={!!searchParams.get("referralId")}
           />
-          {errors.referralId && <p className="text-sm text-red-500">{errors.referralId}</p>}
+          {errors.referralId && (
+            <p className="text-sm text-red-500">{errors.referralId}</p>
+          )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded bg-blue-600 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+            className="w-full rounded bg-green-600 py-2 text-white hover:bg-green-700 disabled:opacity-50"
           >
-            {loading ? "Creating account..." : "Register"}
+            {loading ? "Registering..." : "Register"}
           </button>
         </form>
-        <p className="mt-4 text-center text-sm">
-          Already have an account?{" "}
-          <Link href="/auth/login" className="text-blue-600 hover:underline">
-            Login
-          </Link>
-        </p>
       </div>
     </div>
   );

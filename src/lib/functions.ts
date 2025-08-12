@@ -1,3 +1,5 @@
+"use client";
+
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebaseClient";
 

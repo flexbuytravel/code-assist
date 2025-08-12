@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getAuth } from "firebase/auth";
-import { getFirestore, doc, getDoc } from "firebase/firestore";
+import { getFirestore, doc, getDoc, updateDoc } from "firebase/firestore";
 import { app } from "@/lib/firebase";
 
 export default function CustomerDashboardPage() {
@@ -26,16 +26,15 @@ export default function CustomerDashboardPage() {
 
       if (data.depositPaid) {
         setStatus("depositPaid");
-        startCountdown(new Date(data.depositTimestamp), 6 * 30 * 24 * 60 * 60 * 1000); // 6 months
+        startCountdown(new Date(data.depositTimestamp), 6 * 30 * 24 * 60 * 60 * 1000);
       } else if (data.claimTimestamp) {
         setStatus("pending");
-        startCountdown(new Date(data.claimTimestamp), 48 * 60 * 60 * 1000); // 48 hours
+        startCountdown(new Date(data.claimTimestamp), 48 * 60 * 60 * 1000);
       }
     }
     setLoading(false);
   };
 
-  // Countdown logic
   const startCountdown = (startTime: Date, durationMs: number) => {
     const endTime = startTime.getTime() + durationMs;
 
@@ -52,14 +51,19 @@ export default function CustomerDashboardPage() {
         const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
         const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
         const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-
-        if (days > 0) {
-          setTimeLeft(`${days}d ${hours}h ${minutes}m ${seconds}s`);
-        } else {
-          setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
-        }
+        setTimeLeft(days > 0 ? `${days}d ${hours}h ${minutes}m ${seconds}s` : `${hours}h ${minutes}m ${seconds}s`);
       }
     }, 1000);
+  };
+
+  const markDepositPaid = async () => {
+    if (!auth.currentUser) return;
+    const customerRef = doc(db, "customers", auth.currentUser.uid);
+    await updateDoc(customerRef, {
+      depositPaid: true,
+      depositTimestamp: new Date().toISOString()
+    });
+    fetchCustomerData();
   };
 
   useEffect(() => {
@@ -67,7 +71,6 @@ export default function CustomerDashboardPage() {
   }, [auth.currentUser]);
 
   if (loading) return <p>Loading dashboard...</p>;
-
   if (!customerData) return <p>No customer data found.</p>;
 
   return (
@@ -81,40 +84,19 @@ export default function CustomerDashboardPage() {
           <h2>Package Details</h2>
           <p>Package ID: {customerData.packageId}</p>
           <p>Price: ${customerData.packagePrice}</p>
-          {customerData.agentId ? (
-            <p>Agent: {customerData.agentName || customerData.agentId}</p>
-          ) : customerData.deletedAgent ? (
-            <p>Agent: [Deleted]</p>
-          ) : (
-            <p>Agent: [Unassigned]</p>
-          )}
-
           {timeLeft && (
             <div style={{ marginTop: "10px" }}>
-              <strong>
-                {status === "depositPaid"
-                  ? "Time Remaining to Pay Balance:"
-                  : "Time Remaining to Pay Deposit:"}
-              </strong>{" "}
-              {timeLeft}
+              <strong>{status === "depositPaid" ? "Time Remaining to Pay Balance:" : "Time Remaining to Pay Deposit:"}</strong> {timeLeft}
             </div>
           )}
 
           {status === "pending" && timeLeft !== "Time expired" && (
-            <button style={{ marginTop: "10px" }} onClick={() => alert("Go to Stripe Checkout")}>
-              Pay Deposit
-            </button>
+            <button onClick={markDepositPaid}>Pay Deposit (Temp Button)</button>
           )}
-
           {status === "depositPaid" && timeLeft !== "Time expired" && (
-            <button style={{ marginTop: "10px" }} onClick={() => alert("Go to Final Payment")}>
-              Pay Remaining Balance
-            </button>
+            <button onClick={() => alert("Go to Final Payment")}>Pay Remaining Balance</button>
           )}
-
-          {status === "expired" && (
-            <p style={{ color: "red", marginTop: "10px" }}>This package has expired.</p>
-          )}
+          {status === "expired" && <p style={{ color: "red" }}>This package has expired.</p>}
         </div>
       )}
     </div>

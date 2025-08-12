@@ -1,77 +1,91 @@
-// src/app/api/auth/register/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, doc, getDoc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { firebaseApp } from '@/lib/firebase';
+import { NextResponse } from "next/server";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
+import * as admin from "firebase-admin";
 
-const auth = getAuth(firebaseApp);
-const db = getFirestore(firebaseApp);
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.applicationDefault(),
+  });
+}
 
-export async function POST(req: NextRequest) {
+const auth = getAuth();
+const db = getFirestore();
+
+export async function POST(req: Request) {
   try {
-    const { name, email, password, confirmPassword, phone, address, packageId, referralCode } = await req.json();
+    const { name, email, password, confirmPassword, phone, address, packageId } = await req.json();
 
-    if (!name || !email || !password || !confirmPassword || !packageId || !referralCode) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    // Basic validation
+    if (!name || !email || !password || !confirmPassword || !phone || !address || !packageId) {
+      return NextResponse.json({ error: "All fields are required" }, { status: 400 });
     }
 
     if (password !== confirmPassword) {
-      return NextResponse.json({ error: 'Passwords do not match' }, { status: 400 });
+      return NextResponse.json({ error: "Passwords do not match" }, { status: 400 });
     }
 
     if (password.length < 8) {
-      return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
+      return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
     }
 
-    // Verify package exists and is not claimed
-    const packageRef = doc(db, 'packages', packageId);
-    const packageSnap = await getDoc(packageRef);
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return NextResponse.json({ error: "Invalid email address" }, { status: 400 });
+    }
 
-    if (!packageSnap.exists()) {
-      return NextResponse.json({ error: 'Package not found' }, { status: 404 });
+    // Get package details
+    const packageRef = db.collection("packages").doc(packageId);
+    const packageSnap = await packageRef.get();
+
+    if (!packageSnap.exists) {
+      return NextResponse.json({ error: "Invalid package ID" }, { status: 404 });
     }
 
     const packageData = packageSnap.data();
 
-    if (packageData.claimedBy) {
-      return NextResponse.json({ error: 'Package already claimed' }, { status: 400 });
+    if (packageData.claimed) {
+      return NextResponse.json({ error: "This package has already been claimed" }, { status: 400 });
     }
 
-    if (packageData.referralCode !== referralCode) {
-      return NextResponse.json({ error: 'Invalid referral code' }, { status: 400 });
-    }
+    // Create Firebase Auth user
+    const userRecord = await auth.createUser({
+      email,
+      password,
+      displayName: name,
+      phoneNumber: phone,
+    });
 
-    // Create user in Firebase Auth
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const uid = userCredential.user.uid;
+    // Assign role
+    await auth.setCustomUserClaims(userRecord.uid, {
+      role: "customer",
+      companyId: packageData.companyId,
+      agentId: packageData.agentId,
+    });
 
-    // Store customer in Firestore
-    await setDoc(doc(db, 'customers', uid), {
+    // Save user profile in Firestore
+    await db.collection("users").doc(userRecord.uid).set({
       name,
       email,
-      phone: phone || null,
-      address: address || null,
+      phone,
+      address,
+      role: "customer",
+      companyId: packageData.companyId,
+      agentId: packageData.agentId,
       packageId,
-      referralCode,
-      price: packageData.price,
-      trips: packageData.trips || 1,
-      companyId: packageData.companyId || null,
-      agentId: packageData.agentId || null,
-      createdAt: serverTimestamp(),
-      role: 'customer',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    // Mark package as claimed
-    await updateDoc(packageRef, {
-      claimedBy: uid,
-      claimedAt: serverTimestamp(),
-      status: 'claimed',
+    // Lock package to this customer
+    await packageRef.update({
+      claimed: true,
+      claimedBy: userRecord.uid,
+      claimedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    return NextResponse.json({ success: true, message: 'Customer registered and package claimed successfully' });
-
+    return NextResponse.json({ success: true, uid: userRecord.uid });
   } catch (error: any) {
-    console.error('Registration error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    console.error("Error registering user:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

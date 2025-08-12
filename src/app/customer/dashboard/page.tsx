@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getFirestore, doc, getDoc } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { getFirestore, doc, getDoc } from "firebase/firestore";
 import { app } from "@/lib/firebase";
 
 export default function CustomerDashboardPage() {
@@ -11,6 +11,7 @@ export default function CustomerDashboardPage() {
 
   const [customerData, setCustomerData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [timeLeft, setTimeLeft] = useState<string | null>(null);
 
   const fetchCustomerData = async () => {
     if (!auth.currentUser) return;
@@ -19,9 +20,34 @@ export default function CustomerDashboardPage() {
     const snapshot = await getDoc(customerRef);
 
     if (snapshot.exists()) {
-      setCustomerData(snapshot.data());
+      const data = snapshot.data();
+      setCustomerData(data);
+
+      if (data.claimTimestamp) {
+        startCountdown(new Date(data.claimTimestamp));
+      }
     }
     setLoading(false);
+  };
+
+  // Countdown logic
+  const startCountdown = (claimTime: Date) => {
+    const endTime = claimTime.getTime() + 48 * 60 * 60 * 1000; // +48 hours
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const diff = endTime - now;
+
+      if (diff <= 0) {
+        clearInterval(interval);
+        setTimeLeft("Time expired");
+      } else {
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+        setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+      }
+    }, 1000);
   };
 
   useEffect(() => {
@@ -49,6 +75,12 @@ export default function CustomerDashboardPage() {
             <p>Agent: [Deleted]</p>
           ) : (
             <p>Agent: [Unassigned]</p>
+          )}
+
+          {timeLeft && (
+            <div style={{ marginTop: "10px" }}>
+              <strong>Time Remaining to Purchase:</strong> {timeLeft}
+            </div>
           )}
         </div>
       )}

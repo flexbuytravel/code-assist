@@ -6,7 +6,7 @@ import { getDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import Image from "next/image";
 
-export default function HomePage() {
+export default function ClaimPackagePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -17,7 +17,7 @@ export default function HomePage() {
 
   const handleLoadPackage = async () => {
     if (!packageId) {
-      setError("Package ID is required");
+      setError("Package ID is required.");
       return;
     }
     setError("");
@@ -31,17 +31,18 @@ export default function HomePage() {
         setError("Package not found.");
         return;
       }
+
       const pkgData = pkgSnap.data();
       if (pkgData.claimedBy) {
-        setError("This package is already claimed.");
+        setError("This package has already been claimed.");
         return;
       }
 
-      // Redirect to registration page with IDs in URL
-      router.push(`/register-customer?packageId=${packageId}&referralId=${referralId || ""}`);
+      // Redirect to registration page with package & referral IDs
+      router.push(`/register-customer?packageId=${encodeURIComponent(packageId)}&referralId=${encodeURIComponent(referralId || "")}`);
     } catch (err) {
-      console.error(err);
-      setError("Error loading package.");
+      console.error("Error loading package:", err);
+      setError("Error loading package details.");
     } finally {
       setLoading(false);
     }
@@ -50,6 +51,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
       <Image src="/logo2.png" alt="FlexBuy Logo" width={150} height={150} className="mb-6" />
+
       <div className="bg-white shadow-lg rounded-lg p-6 w-full max-w-md">
         <h1 className="text-2xl font-bold mb-4">Claim Your Package</h1>
 

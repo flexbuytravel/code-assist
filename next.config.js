@@ -2,7 +2,6 @@
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
-  // Allow Next.js to run on localhost and your public IP
   devIndicators: {
     buildActivity: true
   },
@@ -13,7 +12,7 @@ const nextConfig = {
         headers: [
           {
             key: "Access-Control-Allow-Origin",
-            value: "*" // Allow all origins in dev mode
+            value: "*" // Allow all origins for dev mode
           },
           {
             key: "Access-Control-Allow-Methods",

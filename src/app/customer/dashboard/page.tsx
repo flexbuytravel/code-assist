@@ -1,121 +1,71 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { auth, firestore } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { useState } from "react";
 
-export default function CustomerDashboard() {
-  const router = useRouter();
-  const [userId, setUserId] = useState<string | null>(null);
-  const [customerData, setCustomerData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+export default function CustomerDashboardPage() {
+  const [loading, setLoading] = useState(false);
+  const [depositOnly, setDepositOnly] = useState(true);
+  const [includeInsurance, setIncludeInsurance] = useState(false);
 
-  const [paymentType, setPaymentType] = useState<"deposit" | "full">("full");
-  const [insurance, setInsurance] = useState(false);
-  const [processingPayment, setProcessingPayment] = useState(false);
-
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      if (user) {
-        setUserId(user.uid);
-
-        const customerRef = doc(firestore, "customers", user.uid);
-        const customerSnap = await getDoc(customerRef);
-
-        if (customerSnap.exists()) {
-          setCustomerData(customerSnap.data());
-        }
-      } else {
-        router.push("/auth/login");
-      }
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [router]);
-
-  const handlePayment = async () => {
-    if (!userId) return;
-
-    setProcessingPayment(true);
-
+  const handleCheckout = async (packageId: string) => {
     try {
-      const res = await fetch("/api/stripe/create-checkout-session", {
+      setLoading(true);
+
+      const res = await fetch("/api/checkout/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          customerId: userId,
-          paymentType,
-          insurance,
+          packageId,
+          depositOnly,
+          includeInsurance,
         }),
       });
 
       const data = await res.json();
-
       if (data.url) {
-        window.location.href = data.url; // Redirect to Stripe Checkout
+        window.location.href = data.url;
       } else {
-        console.error("Failed to create checkout session:", data.error);
+        alert(data.error || "Something went wrong");
       }
     } catch (error) {
-      console.error("Payment error:", error);
+      console.error("Checkout error:", error);
     } finally {
-      setProcessingPayment(false);
+      setLoading(false);
     }
   };
 
-  if (loading) return <p>Loading dashboard...</p>;
+  // This would be fetched from Firestore for the logged-in customer
+  const myPackageId = "CUSTOMER_PACKAGE_ID_HERE";
 
   return (
-    <div className="max-w-3xl mx-auto p-6">
-      <h1 className="text-2xl font-bold mb-4">Customer Dashboard</h1>
+    <div className="p-6">
+      <h1 className="text-xl font-bold mb-4">Customer Dashboard</h1>
 
-      {customerData?.packageId ? (
-        <div className="border p-4 rounded-lg bg-white shadow">
-          <p>
-            <strong>Package ID:</strong> {customerData.packageId}
-          </p>
-          <p>
-            <strong>Price per Trip:</strong> ${customerData.packagePrice}
-          </p>
-          <p>
-            <strong>Trips:</strong> {customerData.tripCount}
-          </p>
+      <label className="block mb-2">
+        <input
+          type="checkbox"
+          checked={depositOnly}
+          onChange={() => setDepositOnly(!depositOnly)}
+        />{" "}
+        Pay Deposit Only
+      </label>
 
-          <div className="mt-4 space-y-3">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={paymentType === "deposit"}
-                onChange={(e) =>
-                  setPaymentType(e.target.checked ? "deposit" : "full")
-                }
-              />
-              Pay Deposit Only (20% now, balance later)
-            </label>
+      <label className="block mb-4">
+        <input
+          type="checkbox"
+          checked={includeInsurance}
+          onChange={() => setIncludeInsurance(!includeInsurance)}
+        />{" "}
+        Add Trip Insurance
+      </label>
 
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={insurance}
-                onChange={(e) => setInsurance(e.target.checked)}
-              />
-              Add Trip Insurance (doubles trips)
-            </label>
-
-            <button
-              onClick={handlePayment}
-              disabled={processingPayment}
-              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-            >
-              {processingPayment ? "Processing..." : "Pay Now"}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <p>No package assigned yet.</p>
-      )}
+      <button
+        disabled={loading}
+        onClick={() => handleCheckout(myPackageId)}
+        className="bg-green-600 text-white px-4 py-2 rounded"
+      >
+        {loading ? "Processing..." : "Pay Now"}
+      </button>
     </div>
   );
 }

@@ -5,7 +5,6 @@ import Stripe from "stripe";
 admin.initializeApp();
 const db = admin.firestore();
 
-// Stripe test secret key
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2024-04-10"
 });
@@ -45,8 +44,20 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
         }
 
         const packageData = packageSnap.data();
-        if (packageData?.claimed) {
+        if (!packageData) {
+          throw new Error("Package data is empty");
+        }
+
+        // Check if already claimed
+        if (packageData.claimed) {
           throw new Error("Package already claimed");
+        }
+
+        // Price verification: Stripe sends amount_total in cents
+        if (session.amount_total !== packageData.price * 100) {
+          throw new Error(
+            `Payment amount mismatch. Expected ${packageData.price * 100}, got ${session.amount_total}`
+          );
         }
 
         transaction.update(packageRef, {

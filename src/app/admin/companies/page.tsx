@@ -1,63 +1,104 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { assignRole } from "@/lib/roles";
-import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
-import { getFirestore, collection, addDoc } from "firebase/firestore";
+import { useEffect, useState } from "react";
+import { getAuth } from "firebase/auth";
+import {
+  getFirestore,
+  collection,
+  getDocs,
+  query,
+  where,
+  deleteDoc,
+  updateDoc,
+  doc
+} from "firebase/firestore";
 import { app } from "@/lib/firebase";
 
-export default function CompaniesPage() {
-  const [companies, setCompanies] = useState([]);
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
-
+export default function AdminCompaniesPage() {
   const auth = getAuth(app);
   const db = getFirestore(app);
 
-  const handleCreateCompany = async () => {
+  const [companies, setCompanies] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch all companies
+  const fetchCompanies = async () => {
+    const companiesRef = collection(db, "companies");
+    const snapshot = await getDocs(companiesRef);
+
+    const data = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    setCompanies(data);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchCompanies();
+  }, []);
+
+  // Safe-delete company with agent + package cleanup
+  const deleteCompany = async (companyId: string) => {
+    if (!confirm("Are you sure you want to delete this company? All its agents will be removed, but packages will remain linked to the company.")) {
+      return;
+    }
+
     try {
-      // Create auth account
-      const cred = await createUserWithEmailAndPassword(auth, form.email, form.password);
+      // Step 1: Find all agents in this company
+      const agentsRef = collection(db, "agents");
+      const agentsQuery = query(agentsRef, where("companyId", "==", companyId));
+      const agentsSnapshot = await getDocs(agentsQuery);
 
-      // Save company to Firestore
-      await addDoc(collection(db, "companies"), {
-        name: form.name,
-        email: form.email,
-        uid: cred.user.uid,
-        createdAt: new Date(),
-      });
+      // Step 2: For each agent, clean up packages
+      for (const agentDoc of agentsSnapshot.docs) {
+        const agentId = agentDoc.id;
 
-      // Assign role via new helper
-      await assignRole(cred.user.uid, "company");
+        // Find packages linked to this agent
+        const packagesRef = collection(db, "packages");
+        const pkgQuery = query(packagesRef, where("agentId", "==", agentId));
+        const pkgSnapshot = await getDocs(pkgQuery);
 
-      alert("Company account created successfully!");
-      setForm({ name: "", email: "", password: "" });
-    } catch (error: any) {
-      console.error(error);
-      alert(error.message);
+        // Nullify agentId but keep companyId
+        for (const pkg of pkgSnapshot.docs) {
+          await updateDoc(pkg.ref, {
+            agentId: null,
+            deletedAgent: true
+          });
+        }
+
+        // Delete the agent document
+        await deleteDoc(doc(db, "agents", agentId));
+      }
+
+      // Step 3: Delete the company document
+      await deleteDoc(doc(db, "companies", companyId));
+
+      // Step 4: Update UI
+      setCompanies(prev => prev.filter(company => company.id !== companyId));
+
+      alert("Company and its agents deleted successfully. Packages remain linked to the company.");
+    } catch (err) {
+      console.error("Error deleting company:", err);
+      alert("Error deleting company. Please try again.");
     }
   };
 
+  if (loading) return <p>Loading companies...</p>;
+
   return (
     <div>
-      <h1>Companies</h1>
-      <input
-        placeholder="Company Name"
-        value={form.name}
-        onChange={(e) => setForm({ ...form, name: e.target.value })}
-      />
-      <input
-        placeholder="Email"
-        type="email"
-        value={form.email}
-        onChange={(e) => setForm({ ...form, email: e.target.value })}
-      />
-      <input
-        placeholder="Password"
-        type="password"
-        value={form.password}
-        onChange={(e) => setForm({ ...form, password: e.target.value })}
-      />
-      <button onClick={handleCreateCompany}>Create Company</button>
+      <h1>Admin Companies</h1>
+      {companies.length === 0 && <p>No companies found.</p>}
+      <ul>
+        {companies.map(company => (
+          <li key={company.id}>
+            {company.name} ({company.email})
+            <button onClick={() => deleteCompany(company.id)}>Delete</button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -14,8 +14,9 @@ export default function CustomerDashboard() {
   const [error, setError] = useState("");
   const [timeLeft, setTimeLeft] = useState<string>("");
 
+  // Calculate countdown
   const calculateTimeLeft = (claimedAt: number) => {
-    const expiry = claimedAt + 48 * 60 * 60 * 1000;
+    const expiry = claimedAt + 48 * 60 * 60 * 1000; // 48 hours
     const diff = expiry - Date.now();
     if (diff <= 0) return "Expired";
     const hours = Math.floor(diff / (1000 * 60 * 60));
@@ -41,6 +42,7 @@ export default function CustomerDashboard() {
           router.push("/home");
           return;
         }
+
         setUser({ uid: u.uid, ...userData });
 
         if (userData.packageClaimedAt) {
@@ -67,9 +69,9 @@ export default function CustomerDashboard() {
       <h1 className="text-3xl font-bold mb-4">Customer Dashboard</h1>
       {user?.packageId && (
         <div className="mb-4">
-          <p>Package: {user.packageId}</p>
-          <p>Referral: {user.referralId}</p>
-          <p>Time left: <span className="font-bold text-red-600">{timeLeft}</span></p>
+          <p><span className="font-semibold">Package:</span> {user.packageId}</p>
+          <p><span className="font-semibold">Referral:</span> {user.referralId}</p>
+          <p><span className="font-semibold">Time left:</span> <span className="font-bold text-red-600">{timeLeft}</span></p>
         </div>
       )}
       <div className="space-y-4">

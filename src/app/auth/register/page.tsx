@@ -1,12 +1,18 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import axios from "axios";
+import { useRouter, useSearchParams } from "next/navigation";
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
+import toast from "react-hot-toast";
 
 export default function RegisterPage() {
-  const searchParams = useSearchParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const packageIdFromLink = searchParams.get("packageId") || "";
+  const referralIdFromLink = searchParams.get("referralId") || "";
 
   const [formData, setFormData] = useState({
     name: "",
@@ -15,90 +21,101 @@ export default function RegisterPage() {
     confirmPassword: "",
     phone: "",
     address: "",
-    packageId: "",
-    referralId: "",
+    packageId: packageIdFromLink,
+    referralId: referralIdFromLink,
   });
 
-  const [packageInfo, setPackageInfo] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  // Load package details from API
   useEffect(() => {
-    const packageId = searchParams.get("packageId");
-    const referralId = searchParams.get("referralId");
-
-    if (!packageId || !referralId) {
-      setError("Package and referral details are required.");
-      setLoading(false);
-      return;
+    if (packageIdFromLink || referralIdFromLink) {
+      setFormData((prev) => ({
+        ...prev,
+        packageId: packageIdFromLink,
+        referralId: referralIdFromLink,
+      }));
     }
-
-    setFormData((prev) => ({
-      ...prev,
-      packageId,
-      referralId,
-    }));
-
-    const validatePackage = async () => {
-      try {
-        const res = await axios.post("/api/packages/claim", {
-          packageId,
-          referralId,
-        });
-        setPackageInfo(res.data);
-      } catch (err: any) {
-        setError(err.response?.data?.error || "Failed to load package details");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    validatePackage();
-  }, [searchParams]);
+  }, [packageIdFromLink, referralIdFromLink]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value,
+    });
+  };
+
+  const validateForm = () => {
+    if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword || !formData.phone || !formData.address) {
+      toast.error("Please fill in all fields");
+      return false;
+    }
+    if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      toast.error("Please enter a valid email");
+      return false;
+    }
+    if (formData.password.length < 8) {
+      toast.error("Password must be at least 8 characters");
+      return false;
+    }
+    if (formData.password !== formData.confirmPassword) {
+      toast.error("Passwords do not match");
+      return false;
+    }
+    return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
+    if (!validateForm()) return;
 
-    if (formData.password !== formData.confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
-
-    if (formData.password.length < 8) {
-      setError("Password must be at least 8 characters long.");
-      return;
-    }
+    setLoading(true);
 
     try {
-      await axios.post("/api/auth/register", formData);
+      // Validate package before creating account
+      const res = await fetch("/api/customer/package/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          packageId: formData.packageId,
+          referralId: formData.referralId,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Package validation failed");
+
+      // Create Firebase Auth user
+      const userCred = await createUserWithEmailAndPassword(
+        auth,
+        formData.email,
+        formData.password
+      );
+
+      // Save user details in Firestore
+      await setDoc(doc(db, "users", userCred.user.uid), {
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        address: formData.address,
+        role: "customer",
+        packageId: formData.packageId,
+        referralId: formData.referralId,
+        createdAt: new Date(),
+      });
+
+      toast.success("Registration successful!");
       router.push("/customer/dashboard");
-    } catch (err: any) {
-      setError(err.response?.data?.error || "Registration failed");
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error.message || "Registration failed");
+    } finally {
+      setLoading(false);
     }
   };
 
-  if (loading) return <p>Loading package details...</p>;
-  if (error) return <p className="text-red-500">{error}</p>;
-
   return (
-    <div className="max-w-md mx-auto mt-8 p-6 border rounded-lg shadow">
-      <h1 className="text-2xl font-bold mb-4">Register & Claim Package</h1>
-
-      {packageInfo && (
-        <div className="mb-4 p-3 border rounded bg-gray-50">
-          <p><strong>Package ID:</strong> {packageInfo.packageId}</p>
-          <p><strong>Referral ID:</strong> {packageInfo.referralId}</p>
-          <p><strong>Price:</strong> ${packageInfo.price}</p>
-          <p><strong>Trips:</strong> {packageInfo.trips}</p>
-        </div>
-      )}
-
+    <div className="max-w-lg mx-auto p-6">
+      <h1 className="text-2xl font-bold mb-4">Customer Registration</h1>
       <form onSubmit={handleSubmit} className="space-y-4">
         <input
           type="text"
@@ -106,26 +123,23 @@ export default function RegisterPage() {
           placeholder="Full Name"
           value={formData.name}
           onChange={handleChange}
-          required
-          className="w-full border px-3 py-2 rounded"
+          className="input input-bordered w-full"
         />
         <input
           type="email"
           name="email"
-          placeholder="Email Address"
+          placeholder="Email"
           value={formData.email}
           onChange={handleChange}
-          required
-          className="w-full border px-3 py-2 rounded"
+          className="input input-bordered w-full"
         />
         <input
           type="password"
           name="password"
-          placeholder="Password (min 8 chars)"
+          placeholder="Password"
           value={formData.password}
           onChange={handleChange}
-          required
-          className="w-full border px-3 py-2 rounded"
+          className="input input-bordered w-full"
         />
         <input
           type="password"
@@ -133,17 +147,15 @@ export default function RegisterPage() {
           placeholder="Confirm Password"
           value={formData.confirmPassword}
           onChange={handleChange}
-          required
-          className="w-full border px-3 py-2 rounded"
+          className="input input-bordered w-full"
         />
         <input
-          type="text"
+          type="tel"
           name="phone"
           placeholder="Phone Number"
           value={formData.phone}
           onChange={handleChange}
-          required
-          className="w-full border px-3 py-2 rounded"
+          className="input input-bordered w-full"
         />
         <input
           type="text"
@@ -151,32 +163,34 @@ export default function RegisterPage() {
           placeholder="Address"
           value={formData.address}
           onChange={handleChange}
-          required
-          className="w-full border px-3 py-2 rounded"
+          className="input input-bordered w-full"
         />
 
         <input
           type="text"
           name="packageId"
+          placeholder="Package ID"
           value={formData.packageId}
-          readOnly
-          className="w-full border px-3 py-2 rounded bg-gray-100"
+          onChange={handleChange}
+          readOnly={!!packageIdFromLink}
+          className="input input-bordered w-full"
         />
         <input
           type="text"
           name="referralId"
+          placeholder="Referral ID"
           value={formData.referralId}
-          readOnly
-          className="w-full border px-3 py-2 rounded bg-gray-100"
+          onChange={handleChange}
+          readOnly={!!referralIdFromLink}
+          className="input input-bordered w-full"
         />
-
-        {error && <p className="text-red-500">{error}</p>}
 
         <button
           type="submit"
-          className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
+          className="btn btn-primary w-full"
+          disabled={loading}
         >
-          Register & Claim
+          {loading ? "Registering..." : "Register"}
         </button>
       </form>
     </div>

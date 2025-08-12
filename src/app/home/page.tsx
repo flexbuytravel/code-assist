@@ -1,81 +1,69 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function HomePage() {
-  const searchParams = useSearchParams();
   const router = useRouter();
 
-  const prefilledPackageId = searchParams.get("packageId") || "";
-  const prefilledReferral = searchParams.get("referralCode") || "";
-
-  const [packageId, setPackageId] = useState(prefilledPackageId);
-  const [referralCode, setReferralCode] = useState(prefilledReferral);
+  const [packageId, setPackageId] = useState("");
+  const [referralId, setReferralId] = useState("");
   const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const handleLoadPackage = async () => {
     setError("");
-
-    if (!packageId || !referralCode) {
-      setError("Package ID and Referral Code are required.");
+    if (!packageId || !referralId) {
+      setError("Both Package ID and Referral ID are required.");
       return;
     }
 
+    setLoading(true);
     try {
-      setIsLoading(true);
+      // Validate package with backend before redirect
+      const res = await fetch("/api/packages/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ packageId, referralId }),
+      });
 
-      // Verify package exists
-      const res = await fetch(`/api/packages/verify?packageId=${packageId}&referralCode=${referralCode}`);
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Invalid package or referral ID.");
 
-      if (!res.ok || !data.valid) {
-        setError(data.error || "Invalid package or referral code.");
-        setIsLoading(false);
-        return;
-      }
-
-      // Redirect to register page with these params
-      router.push(`/auth/register?packageId=${encodeURIComponent(packageId)}&referralCode=${encodeURIComponent(referralCode)}`);
-    } catch (err) {
-      console.error(err);
-      setError("An unexpected error occurred.");
+      // Redirect to register page with package & referral IDs in URL
+      router.push(`/auth/register?packageId=${encodeURIComponent(packageId)}&referralId=${encodeURIComponent(referralId)}`);
+    } catch (err: any) {
+      setError(err.message);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-md mx-auto py-10">
+    <div className="max-w-md mx-auto p-6 bg-white shadow rounded">
       <h1 className="text-2xl font-bold mb-4">Claim Your Package</h1>
-
-      {error && <div className="bg-red-100 text-red-600 p-2 mb-4 rounded">{error}</div>}
-
+      {error && <p className="text-red-500 mb-4">{error}</p>}
       <div className="space-y-4">
         <input
           type="text"
           placeholder="Package ID"
           value={packageId}
           onChange={(e) => setPackageId(e.target.value)}
-          readOnly={!!prefilledPackageId}
-          className="w-full p-2 border rounded"
+          className="w-full border p-2 rounded"
         />
         <input
           type="text"
-          placeholder="Referral Code"
-          value={referralCode}
-          onChange={(e) => setReferralCode(e.target.value)}
-          readOnly={!!prefilledReferral}
-          className="w-full p-2 border rounded"
+          placeholder="Referral ID"
+          value={referralId}
+          onChange={(e) => setReferralId(e.target.value)}
+          className="w-full border p-2 rounded"
         />
-
         <button
           onClick={handleLoadPackage}
-          disabled={isLoading}
-          className="w-full bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded"
+          disabled={loading}
+          className="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600"
         >
-          {isLoading ? "Loading..." : "Load Package"}
+          {loading ? "Loading..." : "Load Package"}
         </button>
       </div>
     </div>

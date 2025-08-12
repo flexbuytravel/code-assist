@@ -1,66 +1,55 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getAuth } from "firebase/auth";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 import { app } from "@/lib/firebase";
 
-export default function CustomerDashboard() {
+export default function CustomerDashboardPage() {
   const auth = getAuth(app);
   const db = getFirestore(app);
 
-  const [remainingTime, setRemainingTime] = useState<string>("");
+  const [customerData, setCustomerData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchCustomerData = async () => {
+    if (!auth.currentUser) return;
+
+    const customerRef = doc(db, "customers", auth.currentUser.uid);
+    const snapshot = await getDoc(customerRef);
+
+    if (snapshot.exists()) {
+      setCustomerData(snapshot.data());
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    const fetchTimer = async () => {
-      if (!auth.currentUser) return;
-
-      const docRef = doc(db, "customers", auth.currentUser.uid);
-      const snapshot = await getDoc(docRef);
-
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        if (data.timerStart) {
-          const startTime = new Date(data.timerStart).getTime();
-          const expiryTime = startTime + 48 * 60 * 60 * 1000; // 48 hours
-
-          const updateCountdown = () => {
-            const now = Date.now();
-            const diff = expiryTime - now;
-
-            if (diff <= 0) {
-              setRemainingTime("00:00:00");
-              return;
-            }
-
-            const hours = Math.floor(diff / (1000 * 60 * 60));
-            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-
-            setRemainingTime(
-              `${hours.toString().padStart(2, "0")}:${minutes
-                .toString()
-                .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
-            );
-          };
-
-          updateCountdown();
-          const interval = setInterval(updateCountdown, 1000);
-          return () => clearInterval(interval);
-        }
-      }
-    };
-
-    fetchTimer();
+    fetchCustomerData();
   }, [auth.currentUser]);
+
+  if (loading) return <p>Loading dashboard...</p>;
+
+  if (!customerData) return <p>No customer data found.</p>;
 
   return (
     <div>
       <h1>Customer Dashboard</h1>
-      {remainingTime && (
+      <p>Name: {customerData.name}</p>
+      <p>Email: {customerData.email}</p>
+
+      {customerData.packageId && (
         <div>
-          <h2>Time left to purchase:</h2>
-          <p>{remainingTime}</p>
+          <h2>Package Details</h2>
+          <p>Package ID: {customerData.packageId}</p>
+          <p>Price: ${customerData.packagePrice}</p>
+          {customerData.agentId ? (
+            <p>Agent: {customerData.agentName || customerData.agentId}</p>
+          ) : customerData.deletedAgent ? (
+            <p>Agent: [Deleted]</p>
+          ) : (
+            <p>Agent: [Unassigned]</p>
+          )}
         </div>
       )}
     </div>

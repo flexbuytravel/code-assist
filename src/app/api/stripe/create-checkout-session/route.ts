@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { firestore } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2023-10-16",
@@ -9,36 +7,15 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
 
 export async function POST(req: Request) {
   try {
-    const { packageId, customerId } = await req.json();
+    const { packageId, customerId, paymentType } = await req.json();
 
-    if (!packageId || !customerId) {
+    if (!packageId || !customerId || !paymentType) {
       return NextResponse.json(
-        { success: false, message: "Missing required fields" },
+        { error: "Missing required fields" },
         { status: 400 }
       );
     }
 
-    // Verify package exists
-    const packageRef = doc(firestore, "packages", packageId);
-    const packageSnap = await getDoc(packageRef);
-    if (!packageSnap.exists()) {
-      return NextResponse.json(
-        { success: false, message: "Package not found" },
-        { status: 404 }
-      );
-    }
-
-    const packageData = packageSnap.data();
-
-    // Prevent checkout for already claimed packages
-    if (packageData.claimed && packageData.customerId !== customerId) {
-      return NextResponse.json(
-        { success: false, message: "Package already claimed" },
-        { status: 409 }
-      );
-    }
-
-    // Create checkout session
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
@@ -47,13 +24,29 @@ export async function POST(req: Request) {
           price_data: {
             currency: "usd",
             product_data: {
-              name: packageData.name,
-              description: `Referral: ${packageData.referralId}`,
+              name:
+                paymentType === "deposit"
+                  ? "Package Deposit"
+                  : "Full Package Payment",
             },
-            unit_amount: Math.round(packageData.price * 100), // convert to cents
+            // Amount should be dynamically fetched from package details
+            unit_amount: paymentType === "deposit" ? 5000 : 20000, // example: $50 deposit or $200 full
           },
           quantity: 1,
         },
       ],
-      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment-success?packageId=${packageId}&customerId=${customerId}`,
-      cancel_url: `${process
+      metadata: {
+        packageId,
+        customerId,
+        paymentType, // "deposit" or "full"
+      },
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/customer/dashboard?payment=success`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/customer/dashboard?payment=cancelled`,
+    });
+
+    return NextResponse.json({ url: session.url });
+  } catch (err: any) {
+    console.error("Stripe session creation error:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}

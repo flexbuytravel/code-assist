@@ -1,0 +1,52 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { auth, db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { useRouter } from "next/navigation";
+
+export default function TimerPage() {
+  const router = useRouter();
+  const [timeLeft, setTimeLeft] = useState<string>("");
+
+  const calculateTimeLeft = (claimedAt: number) => {
+    const expiry = claimedAt + 48 * 60 * 60 * 1000;
+    const diff = expiry - Date.now();
+    if (diff <= 0) return "Expired";
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+    return `${hours}h ${minutes}m ${seconds}s`;
+  };
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      if (!u) {
+        router.push("/home");
+        return;
+      }
+      const userDoc = await getDoc(doc(db, "users", u.uid));
+      const userData = userDoc.data();
+      if (!userData || userData.role !== "customer") {
+        router.push("/home");
+        return;
+      }
+      if (userData.packageClaimedAt) {
+        setTimeLeft(calculateTimeLeft(userData.packageClaimedAt));
+        const interval = setInterval(() => {
+          setTimeLeft(calculateTimeLeft(userData.packageClaimedAt));
+        }, 1000);
+        return () => clearInterval(interval);
+      }
+    });
+    return () => unsub();
+  }, [router]);
+
+  return (
+    <div>
+      <h1 className="text-2xl font-bold mb-4">Package Timer</h1>
+      <p className="text-lg">{timeLeft}</p>
+    </div>
+  );
+}

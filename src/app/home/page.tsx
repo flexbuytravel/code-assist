@@ -1,82 +1,56 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { getFirestore, doc, getDoc } from "firebase/firestore";
-import Sidebar from "@/components/layout/Sidebar";
+import { useState, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 
-export default function ClaimPackagePage() {
-  const auth = getAuth();
-  const db = getFirestore();
-  const router = useRouter();
+export default function HomePage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
 
-  const [packageId, setPackageId] = useState("");
-  const [referralId, setReferralId] = useState("");
-  const [pkgData, setPkgData] = useState<any>(null);
+  const linkPackageId = searchParams.get("packageId") || "";
+  const linkReferralId = searchParams.get("referralId") || "";
 
-  useEffect(() => {
-    const pkgParam = searchParams.get("packageId");
-    const refParam = searchParams.get("referralId");
+  const [packageId, setPackageId] = useState(linkPackageId);
+  const [referralId, setReferralId] = useState(linkReferralId);
 
-    if (pkgParam) setPackageId(pkgParam);
-    if (refParam) setReferralId(refParam);
+  const isPrefilled = !!linkPackageId && !!linkReferralId;
 
-    if (pkgParam) {
-      loadPackage(pkgParam);
+  const handleLoadPackage = () => {
+    if (!packageId || !referralId) {
+      alert("Please enter both Package ID and Referral ID.");
+      return;
     }
-  }, [searchParams]);
 
-  const loadPackage = async (id: string) => {
-    const pkgDoc = await getDoc(doc(db, "packages", id));
-    if (pkgDoc.exists()) {
-      setPkgData(pkgDoc.data());
-    }
-  };
-
-  const handleRegister = () => {
-    router.push(
-      `/auth/register?packageId=${packageId}&referralId=${referralId}`
-    );
+    // Send to register page with both IDs in query
+    router.push(`/auth/register?packageId=${packageId}&referralId=${referralId}`);
   };
 
   return (
-    <div className="flex min-h-screen bg-gray-100">
-      <Sidebar />
-      <main className="flex-1 p-6">
-        <h1 className="text-2xl font-bold mb-4">Claim Package</h1>
-        <div className="space-y-4 max-w-md bg-white p-6 shadow rounded">
-          <input
-            type="text"
-            placeholder="Package ID"
-            value={packageId}
-            onChange={(e) => setPackageId(e.target.value)}
-            disabled={!!searchParams.get("packageId")}
-            className="w-full border p-2 rounded"
-          />
-          <input
-            type="text"
-            placeholder="Referral ID"
-            value={referralId}
-            onChange={(e) => setReferralId(e.target.value)}
-            disabled={!!searchParams.get("referralId")}
-            className="w-full border p-2 rounded"
-          />
-          {pkgData && (
-            <div className="bg-gray-50 p-4 border rounded">
-              <p>Package Name: {pkgData.name}</p>
-              <p>Price: ${pkgData.price}</p>
-            </div>
-          )}
-          <button
-            onClick={handleRegister}
-            className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700"
-          >
-            Register & Claim
-          </button>
-        </div>
-      </main>
+    <div>
+      <h1>Claim Your Package</h1>
+      <p>Enter your package details to continue.</p>
+
+      <div>
+        <label>Package ID</label>
+        <input
+          type="text"
+          value={packageId}
+          onChange={(e) => setPackageId(e.target.value)}
+          readOnly={isPrefilled}
+        />
+      </div>
+
+      <div>
+        <label>Referral ID</label>
+        <input
+          type="text"
+          value={referralId}
+          onChange={(e) => setReferralId(e.target.value)}
+          readOnly={isPrefilled}
+        />
+      </div>
+
+      <button onClick={handleLoadPackage}>Load Package</button>
     </div>
   );
 }

@@ -1,58 +1,24 @@
-"use client";
+import { getFirestore, collection, query, where, getDocs, updateDoc, doc, deleteDoc } from "firebase/firestore";
+import { app } from "@/lib/firebase";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { getFirestore, collection, query, where, getDocs } from "firebase/firestore";
-import { getRoleFromClaims, hasRole } from "@/lib/roles";
-import Sidebar from "@/components/layout/Sidebar";
+const db = getFirestore(app);
 
-export default function CompanyAgents() {
-  const auth = getAuth();
-  const db = getFirestore();
-  const router = useRouter();
-  const [agents, setAgents] = useState<any[]>([]);
+async function deleteAgent(agentId: string) {
+  // Step 1: Get all packages by this agent
+  const packagesRef = collection(db, "packages");
+  const q = query(packagesRef, where("agentId", "==", agentId));
+  const snapshot = await getDocs(q);
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        router.push("/auth/login");
-        return;
-      }
-      const role = await getRoleFromClaims(currentUser);
-      if (!hasRole({ ...currentUser, role }, "company")) {
-        router.push("/auth/login");
-        return;
-      }
-      const q = query(collection(db, "agents"), where("companyId", "==", currentUser.uid));
-      const snapshot = await getDocs(q);
-      setAgents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+  // Step 2: Nullify agentId but keep companyId
+  for (const pkg of snapshot.docs) {
+    await updateDoc(pkg.ref, {
+      agentId: null,
+      deletedAgent: true // optional flag
     });
-    return () => unsub();
-  }, [auth, db, router]);
+  }
 
-  return (
-    <div className="flex min-h-screen bg-gray-100">
-      <Sidebar />
-      <main className="flex-1 p-6">
-        <h1 className="text-2xl font-bold mb-4">My Agents</h1>
-        <table className="w-full bg-white shadow rounded-lg overflow-hidden">
-          <thead>
-            <tr className="bg-gray-200">
-              <th className="p-3 text-left">Name</th>
-              <th className="p-3 text-left">Email</th>
-            </tr>
-          </thead>
-          <tbody>
-            {agents.map(agent => (
-              <tr key={agent.id} className="border-b">
-                <td className="p-3">{agent.name}</td>
-                <td className="p-3">{agent.email}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </main>
-    </div>
-  );
+  // Step 3: Delete agent doc
+  await deleteDoc(doc(db, "agents", agentId));
+
+  alert("Agent deleted. Packages remain linked to company.");
 }

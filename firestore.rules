@@ -2,92 +2,57 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // --- Auth helper functions ---
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
     function isAdmin() {
-      return isSignedIn() && request.auth.token.role == "admin";
+      return request.auth.token.role == 'admin';
     }
 
     function isCompany() {
-      return isSignedIn() && request.auth.token.role == "company";
+      return request.auth.token.role == 'company';
     }
 
     function isAgent() {
-      return isSignedIn() && request.auth.token.role == "agent";
+      return request.auth.token.role == 'agent';
     }
 
     function isCustomer() {
-      return isSignedIn() && request.auth.token.role == "customer";
+      return request.auth.token.role == 'customer';
     }
 
-    // --- COMPANIES ---
     match /companies/{companyId} {
-      allow read: if isAdmin() || (isCompany() && request.auth.uid == companyId);
       allow create: if isAdmin();
-      allow update, delete: if isAdmin() || (isCompany() && request.auth.uid == companyId);
+      allow read, update, delete: if isAdmin() || (isCompany() && request.auth.uid == companyId);
     }
 
-    // --- AGENTS ---
     match /agents/{agentId} {
-      allow read: if isAdmin()
-                  || (isCompany() && resource.data.companyId == request.auth.uid)
-                  || (isAgent() && request.auth.uid == agentId);
       allow create: if isCompany() && request.resource.data.companyId == request.auth.uid;
-      allow update, delete: if isAdmin()
-                            || (isCompany() && resource.data.companyId == request.auth.uid)
-                            || (isAgent() && request.auth.uid == agentId);
+      allow read, update, delete: if isAdmin() || (isCompany() && resource.data.companyId == request.auth.uid) || (isAgent() && request.auth.uid == agentId);
     }
 
-    // --- PACKAGES ---
     match /packages/{packageId} {
-      allow read: if isAdmin()
-                  || (isCompany() && resource.data.companyId == request.auth.uid)
-                  || (isAgent() && request.auth.uid == resource.data.agentId)
-                  || isCustomer();
-
-      // Create: only agents can create packages for themselves and must set companyId
+      // Create: only agents can create, must include their own agentId and a valid companyId
       allow create: if isAgent()
-                    && request.resource.data.agentId == request.auth.uid
-                    && request.resource.data.companyId != null;
+        && request.resource.data.agentId == request.auth.uid
+        && request.resource.data.companyId is string
+        && request.resource.data.companyId != "";
 
-      // Update/Delete: 
-      // - Admin: full control
-      // - Company: can modify own packages
-      // - Agent: can modify own packages
+      // Read: anyone signed in can read packages
+      allow read: if request.auth != null;
+
+      // Update:
+      //  - Only the agent who owns it, the company that owns it, or admin can update
+      //  - Claimed packages cannot have `claimedBy` changed unless admin
       allow update: if (
-        isAdmin() ||
+        (isAgent() && resource.data.agentId == request.auth.uid) ||
         (isCompany() && resource.data.companyId == request.auth.uid) ||
-        (isAgent() && request.auth.uid == resource.data.agentId)
-      )
-      // Additional rule: prevent overwrite of claimedBy unless admin
-      && (
-        !("claimedBy" in resource.data) || // Not yet claimed
-        ("claimedBy" in resource.data && resource.data.claimedBy == request.resource.data.claimedBy && !isAdmin()) ||
         isAdmin()
-      );
+      )
+      && !(("claimedBy" in resource.data) && (resource.data.claimedBy != request.resource.data.claimedBy) && !isAdmin());
 
-      allow delete: if isAdmin()
-                    || (isCompany() && resource.data.companyId == request.auth.uid)
-                    || (isAgent() && request.auth.uid == resource.data.agentId);
-    }
-
-    // --- CUSTOMERS ---
-    match /customers/{customerId} {
-      allow read: if isAdmin() || (isCustomer() && request.auth.uid == customerId);
-      allow create: if isSignedIn() && request.auth.uid == request.resource.id;
-      allow update, delete: if isAdmin() || (isCustomer() && request.auth.uid == customerId);
-    }
-
-    // --- CLAIMED PACKAGES SUBCOLLECTION ---
-    match /customers/{customerId}/claimedPackages/{packageId} {
-      allow read: if isAdmin() || (isCustomer() && request.auth.uid == customerId);
-      // Only the logged-in customer can add to their claimedPackages
-      // Package must belong to same customer as auth UID
-      allow create: if isCustomer() && request.auth.uid == customerId;
-      allow delete: if isAdmin() || (isCustomer() && request.auth.uid == customerId);
+      // Claim prevention:
+      // Customers can only claim if it's unclaimed
+      allow update: if isCustomer()
+        && !( "claimedBy" in resource.data ) // <-- prevents claiming already claimed package
+        && request.resource.data.claimedBy == request.auth.uid;
     }
   }
 }

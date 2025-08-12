@@ -1,95 +1,79 @@
-import { NextResponse } from "next/server";
-import Stripe from "stripe";
-import { firestore } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { NextResponse } from 'next/server';
+import Stripe from 'stripe';
+import { getFirestore, doc, getDoc } from 'firebase-admin/firestore';
+import { initializeApp, getApps } from 'firebase-admin/app';
+
+if (!getApps().length) {
+  initializeApp({
+    credential: require('firebase-admin').credential.applicationDefault(),
+  });
+}
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: "2023-10-16",
+  apiVersion: '2024-06-20',
 });
 
 export async function POST(req: Request) {
   try {
-    const { customerId, paymentType, insurance } = await req.json();
-
-    if (!customerId || !paymentType) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    const { packageId, paymentType, insurance } = await req.json();
+    if (!packageId || !paymentType) {
+      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
     }
 
-    // Fetch customer from Firestore
-    const customerRef = doc(firestore, "customers", customerId);
-    const customerSnap = await getDoc(customerRef);
-
-    if (!customerSnap.exists()) {
-      return NextResponse.json({ error: "Customer not found" }, { status: 404 });
-    }
-
-    const customerData = customerSnap.data();
-    if (!customerData.packageId) {
-      return NextResponse.json({ error: "Customer has no package assigned" }, { status: 400 });
-    }
-
-    // Fetch package to get price + trip count
-    const packageRef = doc(firestore, "packages", customerData.packageId);
+    const db = getFirestore();
+    const packageRef = doc(db, 'packages', packageId);
     const packageSnap = await getDoc(packageRef);
 
     if (!packageSnap.exists()) {
-      return NextResponse.json({ error: "Package not found" }, { status: 404 });
+      return NextResponse.json({ error: 'Package not found' }, { status: 404 });
     }
 
     const packageData = packageSnap.data();
-    const baseTripPrice = packageData.tripPrice || 0;
-    let tripCount = packageData.tripCount || 1;
+    let totalAmount = 0;
 
-    // Apply insurance multiplier
-    if (insurance) {
-      tripCount *= 2; // doubles number of trips
+    // Pricing logic
+    if (paymentType === 'deposit') {
+      totalAmount = 20000; // $200 in cents
+    } else if (paymentType === 'full') {
+      totalAmount = packageData.price * 100; // convert to cents
     }
 
-    // Calculate total package price
-    let totalPackagePrice = baseTripPrice * tripCount;
-
-    // Apply deposit fraction if deposit payment
-    let finalPriceInCents: number;
-    if (paymentType === "deposit") {
-      finalPriceInCents = Math.round(totalPackagePrice * 0.2 * 100);
-    } else if (paymentType === "full") {
-      finalPriceInCents = Math.round(totalPackagePrice * 100);
-    } else {
-      return NextResponse.json({ error: "Invalid payment type" }, { status: 400 });
+    if (insurance === 'double-up') {
+      totalAmount += 60000; // +$600
     }
 
-    // Create Stripe checkout session
+    // Determine connected account (company that owns the agent)
+    let stripeAccountId = null;
+    if (packageData.companyStripeId) {
+      stripeAccountId = packageData.companyStripeId;
+    }
+
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      mode: "payment",
+      payment_method_types: ['card'],
       line_items: [
         {
           price_data: {
-            currency: "usd",
-            product_data: {
-              name: `Travel Package (${tripCount} trips)`,
-              description: insurance
-                ? "Includes trip insurance (double trips)"
-                : "No trip insurance",
-            },
-            unit_amount: finalPriceInCents,
+            currency: 'usd',
+            product_data: { name: packageData.name || 'Travel Package' },
+            unit_amount: totalAmount,
           },
           quantity: 1,
         },
       ],
-      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/dashboard?payment=success`,
-      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/dashboard?payment=cancel`,
+      mode: 'payment',
+      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/dashboard?success=true`,
+      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/dashboard?canceled=true`,
       metadata: {
-        customerId,
-        packageId: customerData.packageId,
+        packageId,
         paymentType,
-        insurance: insurance ? "true" : "false",
+        insurance: insurance || 'none',
+        customerId: packageData.customerId || '',
       },
-    });
+    }, stripeAccountId ? { stripeAccount: stripeAccountId } : undefined);
 
     return NextResponse.json({ url: session.url });
-  } catch (error) {
-    console.error("Stripe session creation error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  } catch (error: any) {
+    console.error('Stripe Checkout Error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

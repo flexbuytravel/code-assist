@@ -3,115 +3,156 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getAuth } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 export default function CustomerDashboard() {
   const router = useRouter();
   const auth = getAuth();
-  const [loading, setLoading] = useState(true);
+  const user = auth.currentUser;
+
   const [packageData, setPackageData] = useState<any>(null);
   const [deposit, setDeposit] = useState(false);
   const [doubleUp, setDoubleUp] = useState(false);
+  const [fullPayment, setFullPayment] = useState(false);
+  const [basePrice, setBasePrice] = useState(0);
   const [totalPrice, setTotalPrice] = useState(0);
-  const [tripCount, setTripCount] = useState(0);
+  const [trips, setTrips] = useState(0);
 
   useEffect(() => {
-    const fetchData = async () => {
-      if (!auth.currentUser) {
-        router.push("/auth/login");
-        return;
-      }
+    if (!user) {
+      router.push("/auth/login");
+      return;
+    }
+    loadPackage();
+  }, [user]);
 
-      const userDoc = await getDoc(doc(db, "users", auth.currentUser.uid));
-      if (!userDoc.exists()) return;
+  const loadPackage = async () => {
+    const userDoc = await getDoc(doc(db, "users", user!.uid));
+    if (!userDoc.exists()) return;
 
-      const data = userDoc.data();
-      if (!data.packageId) {
-        router.push("/home");
-        return;
-      }
-
-      const pkgDoc = await getDoc(doc(db, "packages", data.packageId));
-      if (pkgDoc.exists()) {
-        const pkg = pkgDoc.data();
-        setPackageData(pkg);
-        setTotalPrice(pkg.price);
-        setTripCount(pkg.trips || 1);
-      }
-
-      setLoading(false);
-    };
-
-    fetchData();
-  }, []);
+    const userData = userDoc.data();
+    const pkgDoc = await getDoc(doc(db, "packages", userData.packageId));
+    if (pkgDoc.exists()) {
+      const pkg = pkgDoc.data();
+      setPackageData(pkg);
+      setBasePrice(pkg.price);
+      setTotalPrice(pkg.price);
+      setTrips(pkg.trips || 0);
+    }
+  };
 
   useEffect(() => {
-    if (!packageData) return;
-    let price = packageData.price;
-    let trips = packageData.trips || 1;
+    let price = basePrice;
+    let tripCount = packageData?.trips || 0;
 
     if (deposit) {
       price = 200;
-      trips += 1;
+      tripCount += 1;
     }
-
     if (doubleUp) {
-      price += 600;
-      trips *= 2;
+      price = 600;
+      tripCount *= 2;
+    }
+    if (fullPayment) {
+      price = basePrice;
     }
 
     setTotalPrice(price);
-    setTripCount(trips);
-  }, [deposit, doubleUp, packageData]);
+    setTrips(tripCount);
+  }, [deposit, doubleUp, fullPayment, basePrice, packageData]);
 
-  const handleCheckout = async () => {
-    const res = await fetch("/api/customer/checkout", {
-      method: "POST",
-      body: JSON.stringify({
-        packageId: packageData.id,
-        deposit,
-        doubleUp
-      })
+  const handlePayment = async () => {
+    if (!user) return;
+
+    await updateDoc(doc(db, "users", user.uid), {
+      paymentChoice: fullPayment
+        ? "full"
+        : deposit
+        ? "deposit"
+        : doubleUp
+        ? "double-up"
+        : "none",
+      trips,
+      paymentDue: totalPrice,
+      paymentStatus: "pending",
     });
-    const { url } = await res.json();
-    router.push(url);
+
+    // Send to backend to create Stripe checkout session
+    const res = await fetch("/api/stripe/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: totalPrice * 100, userId: user.uid }),
+    });
+
+    const data = await res.json();
+    if (data.url) {
+      window.location.href = data.url;
+    } else {
+      alert("Payment setup failed");
+    }
   };
 
-  if (loading) return <p>Loading...</p>;
+  if (!packageData) {
+    return <p>Loading package...</p>;
+  }
 
   return (
     <div className="max-w-lg mx-auto mt-10 p-4 border rounded shadow">
       <h1 className="text-2xl font-bold mb-4">Your Package</h1>
-      <p>Package: {packageData?.name}</p>
-      <p>Trips: {tripCount}</p>
-      <p>Total Price: ${totalPrice}</p>
 
-      <div className="mt-4">
-        <label>
+      <p className="mb-2">Package: {packageData.name}</p>
+      <p className="mb-2">Base Price: ${basePrice}</p>
+      <p className="mb-2">Trips: {trips}</p>
+      <p className="mb-4">Total Price: ${totalPrice}</p>
+
+      <div className="mb-4">
+        <label className="flex items-center">
           <input
             type="checkbox"
             checked={deposit}
-            onChange={(e) => setDeposit(e.target.checked)}
+            onChange={() => {
+              setDeposit(!deposit);
+              setDoubleUp(false);
+              setFullPayment(false);
+            }}
+            className="mr-2"
           />
-          Pay Deposit Only ($200, adds 1 trip, 6-month window)
+          $200 Deposit (Adds 1 trip, 6-month timer)
         </label>
-      </div>
 
-      <div className="mt-2">
-        <label>
+        <label className="flex items-center mt-2">
           <input
             type="checkbox"
             checked={doubleUp}
-            onChange={(e) => setDoubleUp(e.target.checked)}
+            onChange={() => {
+              setDoubleUp(!doubleUp);
+              setDeposit(false);
+              setFullPayment(false);
+            }}
+            className="mr-2"
           />
-          Double Up ($600, doubles trips, 54-month window)
+          $600 Double-Up (Doubles trips, 54-month timer)
+        </label>
+
+        <label className="flex items-center mt-2">
+          <input
+            type="checkbox"
+            checked={fullPayment}
+            onChange={() => {
+              setFullPayment(!fullPayment);
+              setDeposit(false);
+              setDoubleUp(false);
+            }}
+            className="mr-2"
+          />
+          Full Payment (Removes timer)
         </label>
       </div>
 
       <button
-        onClick={handleCheckout}
-        className="mt-4 px-4 py-2 bg-blue-600 text-white rounded"
+        onClick={handlePayment}
+        className="px-4 py-2 bg-green-600 text-white rounded"
       >
         Continue to Payment
       </button>

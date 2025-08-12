@@ -1,65 +1,58 @@
 "use client";
 
-import { useState } from "react";
-import { createPackage } from "@/lib/functions";
+import { useEffect, useState } from "react";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth, db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function AgentDashboard() {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [price, setPrice] = useState<number>(0);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const router = useRouter();
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const handleCreatePackage = async () => {
-    if (!name || !price) return alert("Please enter package name and price.");
-    setLoading(true);
-    try {
-      const res = await createPackage(name, description, price);
-      setResult(res);
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || "Error creating package");
-    } finally {
-      setLoading(false);
-    }
-  };
+  // 🔹 Secure role-based access for Agents
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      if (!u) {
+        router.push("/home");
+        return;
+      }
+      try {
+        const userDoc = await getDoc(doc(db, "users", u.uid));
+        if (!userDoc.exists()) {
+          setError("User record not found.");
+          return;
+        }
+        const userData = userDoc.data();
+        if (userData.role !== "agent") {
+          router.push("/home");
+          return;
+        }
+        setUser({ uid: u.uid, ...userData });
+      } catch (err) {
+        console.error(err);
+        setError("Error loading agent dashboard.");
+      } finally {
+        setLoading(false);
+      }
+    });
+    return () => unsub();
+  }, [router]);
 
+  if (loading) return <div className="p-6">Loading...</div>;
+  if (error) return <div className="p-6 text-red-600">{error}</div>;
+
+  // 🔹 Original Agent UI
   return (
-    <div style={{ padding: "2rem" }}>
-      <h1>Agent Dashboard</h1>
-      <p>Create new travel packages</p>
+    <div className="p-6 max-w-6xl mx-auto">
+      <h1 className="text-3xl font-bold mb-6">Agent Dashboard</h1>
+      <p className="mb-6 text-lg">Welcome, {user?.name || "Agent"}.</p>
 
-      <div style={{ marginTop: "1rem" }}>
-        <input
-          type="text"
-          placeholder="Package Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          style={{ display: "block", marginBottom: "0.5rem" }}
-        />
-        <textarea
-          placeholder="Description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          style={{ display: "block", marginBottom: "0.5rem" }}
-        />
-        <input
-          type="number"
-          placeholder="Price"
-          value={price}
-          onChange={(e) => setPrice(parseFloat(e.target.value))}
-          style={{ display: "block", marginBottom: "0.5rem" }}
-        />
-        <button onClick={handleCreatePackage} disabled={loading}>
-          {loading ? "Creating..." : "Create Package"}
-        </button>
-      </div>
-
-      {result && (
-        <pre style={{ marginTop: "1rem", background: "#f5f5f5", padding: "1rem" }}>
-          {JSON.stringify(result, null, 2)}
-        </pre>
-      )}
-    </div>
-  );
-}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        {/* Create Package */}
+        <Link
+          href="/agent/create-package"
+          className="bg-blue-600 hover:bg-blue-700

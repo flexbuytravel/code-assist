@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
+import axios from "axios";
 
 export default function RegisterPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   const [formData, setFormData] = useState({
     name: "",
@@ -15,86 +16,89 @@ export default function RegisterPage() {
     phone: "",
     address: "",
     packageId: "",
-    referralId: ""
+    referralId: "",
   });
 
-  const [lockedFields, setLockedFields] = useState(false);
+  const [packageInfo, setPackageInfo] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
 
-  // Read URL params on mount
+  // Load package details from API
   useEffect(() => {
-    const pkgId = searchParams.get("packageId") || "";
-    const refId = searchParams.get("referralId") || "";
+    const packageId = searchParams.get("packageId");
+    const referralId = searchParams.get("referralId");
 
-    if (pkgId && refId) {
-      setFormData((prev) => ({
-        ...prev,
-        packageId: pkgId,
-        referralId: refId
-      }));
-      setLockedFields(true);
+    if (!packageId || !referralId) {
+      setError("Package and referral details are required.");
+      setLoading(false);
+      return;
     }
+
+    setFormData((prev) => ({
+      ...prev,
+      packageId,
+      referralId,
+    }));
+
+    const validatePackage = async () => {
+      try {
+        const res = await axios.post("/api/packages/claim", {
+          packageId,
+          referralId,
+        });
+        setPackageInfo(res.data);
+      } catch (err: any) {
+        setError(err.response?.data?.error || "Failed to load package details");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    validatePackage();
   }, [searchParams]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const validateForm = () => {
-    if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword) {
-      return "Please fill in all required fields.";
-    }
-    if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      return "Invalid email address.";
-    }
-    if (formData.password.length < 8) {
-      return "Password must be at least 8 characters.";
-    }
-    if (formData.password !== formData.confirmPassword) {
-      return "Passwords do not match.";
-    }
-    if (!formData.packageId || !formData.referralId) {
-      return "Package ID and Referral ID are required.";
-    }
-    return "";
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    const validationError = validateForm();
-    if (validationError) {
-      setError(validationError);
+
+    if (formData.password !== formData.confirmPassword) {
+      setError("Passwords do not match.");
       return;
     }
 
-    setLoading(true);
+    if (formData.password.length < 8) {
+      setError("Password must be at least 8 characters long.");
+      return;
+    }
+
     try {
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Registration failed.");
-      }
-
+      await axios.post("/api/auth/register", formData);
       router.push("/customer/dashboard");
     } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      setError(err.response?.data?.error || "Registration failed");
     }
   };
 
+  if (loading) return <p>Loading package details...</p>;
+  if (error) return <p className="text-red-500">{error}</p>;
+
   return (
-    <div className="max-w-md mx-auto p-6 bg-white shadow rounded">
-      <h1 className="text-2xl font-bold mb-4">Register</h1>
-      {error && <p className="text-red-500 mb-4">{error}</p>}
+    <div className="max-w-md mx-auto mt-8 p-6 border rounded-lg shadow">
+      <h1 className="text-2xl font-bold mb-4">Register & Claim Package</h1>
+
+      {packageInfo && (
+        <div className="mb-4 p-3 border rounded bg-gray-50">
+          <p><strong>Package ID:</strong> {packageInfo.packageId}</p>
+          <p><strong>Referral ID:</strong> {packageInfo.referralId}</p>
+          <p><strong>Price:</strong> ${packageInfo.price}</p>
+          <p><strong>Trips:</strong> {packageInfo.trips}</p>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <input
           type="text"
@@ -102,23 +106,26 @@ export default function RegisterPage() {
           placeholder="Full Name"
           value={formData.name}
           onChange={handleChange}
-          className="w-full border p-2 rounded"
+          required
+          className="w-full border px-3 py-2 rounded"
         />
         <input
           type="email"
           name="email"
-          placeholder="Email"
+          placeholder="Email Address"
           value={formData.email}
           onChange={handleChange}
-          className="w-full border p-2 rounded"
+          required
+          className="w-full border px-3 py-2 rounded"
         />
         <input
           type="password"
           name="password"
-          placeholder="Password"
+          placeholder="Password (min 8 chars)"
           value={formData.password}
           onChange={handleChange}
-          className="w-full border p-2 rounded"
+          required
+          className="w-full border px-3 py-2 rounded"
         />
         <input
           type="password"
@@ -126,15 +133,17 @@ export default function RegisterPage() {
           placeholder="Confirm Password"
           value={formData.confirmPassword}
           onChange={handleChange}
-          className="w-full border p-2 rounded"
+          required
+          className="w-full border px-3 py-2 rounded"
         />
         <input
-          type="tel"
+          type="text"
           name="phone"
           placeholder="Phone Number"
           value={formData.phone}
           onChange={handleChange}
-          className="w-full border p-2 rounded"
+          required
+          className="w-full border px-3 py-2 rounded"
         />
         <input
           type="text"
@@ -142,32 +151,32 @@ export default function RegisterPage() {
           placeholder="Address"
           value={formData.address}
           onChange={handleChange}
-          className="w-full border p-2 rounded"
+          required
+          className="w-full border px-3 py-2 rounded"
         />
+
         <input
           type="text"
           name="packageId"
-          placeholder="Package ID"
           value={formData.packageId}
-          onChange={handleChange}
-          readOnly={lockedFields}
-          className={`w-full border p-2 rounded ${lockedFields ? "bg-gray-100" : ""}`}
+          readOnly
+          className="w-full border px-3 py-2 rounded bg-gray-100"
         />
         <input
           type="text"
           name="referralId"
-          placeholder="Referral ID"
           value={formData.referralId}
-          onChange={handleChange}
-          readOnly={lockedFields}
-          className={`w-full border p-2 rounded ${lockedFields ? "bg-gray-100" : ""}`}
+          readOnly
+          className="w-full border px-3 py-2 rounded bg-gray-100"
         />
+
+        {error && <p className="text-red-500">{error}</p>}
+
         <button
           type="submit"
-          disabled={loading}
-          className="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600"
+          className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
         >
-          {loading ? "Registering..." : "Register"}
+          Register & Claim
         </button>
       </form>
     </div>

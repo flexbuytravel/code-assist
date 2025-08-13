@@ -1,100 +1,55 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { buffer } from "micro";
-import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
-
-if (!getApps().length) {
-  initializeApp({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    credential: cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-    }),
-  });
-}
-
-const db = getFirestore();
-if (process.env.NODE_ENV === "development") {
-  db.settings({ host: "localhost:8080", ssl: false });
-}
+import { firestore } from "@/lib/firebase";
+import { doc, updateDoc } from "firebase/firestore";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-06-20",
+  apiVersion: "2023-10-16",
 });
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
 export async function POST(req: Request) {
-  const sig = req.headers.get("stripe-signature");
-  if (!sig) {
-    return NextResponse.json({ error: "Missing Stripe signature" }, { status: 400 });
-  }
+  const sig = req.headers.get("stripe-signature") as string;
 
-  let event: Stripe.Event;
-
+  let event;
   try {
-    const rawBody = await req.arrayBuffer();
+    const body = await req.text();
     event = stripe.webhooks.constructEvent(
-      Buffer.from(rawBody),
+      body,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET!
     );
   } catch (err: any) {
     console.error("Webhook signature verification failed:", err.message);
-    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
+    return NextResponse.json({ error: err.message }, { status: 400 });
   }
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
 
+    const packageId = session.metadata?.packageId;
+    const insuranceType = session.metadata?.insuranceType;
     const customerId = session.metadata?.customerId;
-    const option = session.metadata?.option;
 
-    if (!customerId || !option) {
-      console.error("Missing metadata in checkout session");
-      return NextResponse.json({ received: true });
+    // Update customer record in Firestore
+    const customerRef = doc(firestore, "customers", customerId);
+    let trips = 1;
+    let expiryMonths = 0;
+
+    if (insuranceType === "deposit") {
+      trips += 1;
+      expiryMonths = 6;
+    } else if (insuranceType === "double_up") {
+      trips *= 2;
+      expiryMonths = 54;
     }
 
-    const customerRef = db.collection("customers").doc(customerId);
-    const customerSnap = await customerRef.get();
-
-    if (!customerSnap.exists) {
-      console.error("Customer doc not found:", customerId);
-      return NextResponse.json({ received: true });
-    }
-
-    const customerData = customerSnap.data() || {};
-    let updatedTrips = customerData.trips || 0;
-    let newExpiration = customerData.expirationDate || null;
-
-    if (option === "deposit") {
-      updatedTrips += 1;
-      const sixMonths = new Date();
-      sixMonths.setMonth(sixMonths.getMonth() + 6);
-      newExpiration = sixMonths.toISOString();
-    } else if (option === "doubleUp") {
-      updatedTrips = updatedTrips * 2 || 2;
-      const fiftyFourMonths = new Date();
-      fiftyFourMonths.setMonth(fiftyFourMonths.getMonth() + 54);
-      newExpiration = fiftyFourMonths.toISOString();
-    } else if (option === "full") {
-      // Full payment, trips stay the same but clear timer
-      newExpiration = null;
-    }
-
-    await customerRef.update({
-      trips: updatedTrips,
-      expirationDate: newExpiration,
+    await updateDoc(customerRef, {
       paymentStatus: "paid",
+      amountPaid: session.amount_total! / 100,
+      insuranceType,
+      trips,
+      expiryDate: new Date(new Date().setMonth(new Date().getMonth() + expiryMonths)),
     });
-
-    console.log(`Customer ${customerId} updated with option ${option}`);
   }
 
   return NextResponse.json({ received: true });

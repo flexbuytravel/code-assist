@@ -1,66 +1,40 @@
-// src/app/api/admin/company/create/route.ts
-
-import { NextRequest, NextResponse } from "next/server";
-import { getAuth } from "firebase-admin/auth";
+import { NextResponse } from "next/server";
 import { db } from "@/lib/firebaseAdmin";
+import { getAuth } from "firebase-admin/auth";
+import { doc, setDoc, serverTimestamp } from "firebase-admin/firestore";
 
-/**
- * POST /api/admin/company/create
- * Creates a new company document in Firestore.
- */
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    // Verify Firebase Auth
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader) {
+      return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 });
     }
 
-    const idToken = authHeader.split("Bearer ")[1];
+    const idToken = authHeader.replace("Bearer ", "").trim();
     const decodedToken = await getAuth().verifyIdToken(idToken);
 
-    if (decodedToken.role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!decodedToken.admin) {
+      return NextResponse.json({ error: "Forbidden: Admins only" }, { status: 403 });
     }
 
     const { companyId, name, address, phone, email } = await req.json();
 
-    if (!companyId || !name) {
-      return NextResponse.json(
-        { error: "companyId and name are required" },
-        { status: 400 }
-      );
+    if (!companyId || !name || !address || !phone || !email) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    const companyRef = db.collection("companies").doc(companyId);
-    const docSnapshot = await companyRef.get();
-
-    if (docSnapshot.exists) {
-      return NextResponse.json(
-        { error: `Company with ID ${companyId} already exists` },
-        { status: 409 }
-      );
-    }
-
-    const newCompany = {
+    await setDoc(doc(db, "companies", companyId), {
       name,
-      address: address || null,
-      phone: phone || null,
-      email: email || null,
-      createdAt: new Date().toISOString(),
-    };
-
-    await companyRef.set(newCompany);
-
-    return NextResponse.json({
-      message: `Company ${companyId} created successfully`,
-      data: newCompany,
+      address,
+      phone,
+      email,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
+
+    return NextResponse.json({ success: true, message: "Company created successfully" }, { status: 201 });
   } catch (error: any) {
     console.error("Error creating company:", error);
-    return NextResponse.json(
-      { error: "Failed to create company" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error", details: error.message }, { status: 500 });
   }
 }

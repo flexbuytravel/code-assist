@@ -2,55 +2,41 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: "2023-10-16",
+  apiVersion: "2024-06-20",
 });
 
 export async function POST(req: Request) {
   try {
-    const { packageId, option } = await req.json();
+    const { amount, packageId, customerEmail } = await req.json();
 
-    // Base price
-    const basePrice = 998;
-
-    let amount = 0;
-    if (option === "deposit") {
-      amount = 200;
-    } else if (option === "double-up") {
-      amount = basePrice + 600;
-    } else if (option === "full") {
-      amount = basePrice;
-    } else {
-      return NextResponse.json({ error: "Invalid payment option" }, { status: 400 });
+    if (!amount || !packageId || !customerEmail) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    // Create a checkout session
+    // Stripe Checkout session
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
-      mode: "payment",
+      customer_email: customerEmail,
       line_items: [
         {
           price_data: {
             currency: "usd",
             product_data: {
-              name: `Package ${packageId} - ${option}`,
+              name: `Travel Package #${packageId}`,
             },
-            unit_amount: amount * 100, // Stripe takes cents
+            unit_amount: Math.round(amount * 100),
           },
           quantity: 1,
         },
       ],
-      metadata: {
-        packageId,
-        option,
-        amount,
-      },
+      mode: "payment",
       success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/payment-cancel`,
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (err) {
-    console.error("Stripe checkout session error:", err);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+  } catch (error: any) {
+    console.error("Error creating checkout session:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

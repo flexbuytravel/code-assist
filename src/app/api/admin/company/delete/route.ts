@@ -1,18 +1,29 @@
-import { NextResponse } from "next/server";
-import { firestore } from "@/lib/firebase"; // Client SDK for emulator/live Firestore
-import { doc, deleteDoc, getDoc } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+// src/app/api/admin/company/delete/route.ts
 
-// Middleware-like helper for role-based access
-async function requireAdmin(user: any) {
-  if (!user || user.role !== "admin") {
-    throw new Error("Unauthorized: Admin access required");
-  }
-}
+import { NextRequest, NextResponse } from "next/server";
+import { getAuth } from "firebase-admin/auth";
+import { db } from "@/lib/firebaseAdmin";
 
-export async function DELETE(req: Request) {
+/**
+ * DELETE /api/admin/company/delete
+ * Deletes a company and optionally all linked agents.
+ */
+export async function DELETE(req: NextRequest) {
   try {
-    const { companyId, user } = await req.json();
+    // Verify Firebase Auth
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const idToken = authHeader.split("Bearer ")[1];
+    const decodedToken = await getAuth().verifyIdToken(idToken);
+
+    if (decodedToken.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { companyId, deleteAgents = false } = await req.json();
 
     if (!companyId) {
       return NextResponse.json(
@@ -21,27 +32,31 @@ export async function DELETE(req: Request) {
       );
     }
 
-    // Role check
-    await requireAdmin(user);
+    // Delete the company document
+    await db.collection("companies").doc(companyId).delete();
 
-    const companyRef = doc(firestore, "companies", companyId);
-    const snapshot = await getDoc(companyRef);
+    // Optionally delete all agents linked to this company
+    if (deleteAgents) {
+      const agentsSnapshot = await db
+        .collection("agents")
+        .where("companyId", "==", companyId)
+        .get();
 
-    if (!snapshot.exists()) {
-      return NextResponse.json(
-        { error: "Company not found" },
-        { status: 404 }
-      );
+      const batch = db.batch();
+      agentsSnapshot.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
     }
 
-    // Delete company document
-    await deleteDoc(companyRef);
-
-    return NextResponse.json({ success: true, companyId });
+    return NextResponse.json({
+      message: `Company ${companyId} deleted successfully`,
+      agentsDeleted: deleteAgents ? "Yes" : "No",
+    });
   } catch (error: any) {
     console.error("Error deleting company:", error);
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      { error: "Failed to delete company" },
       { status: 500 }
     );
   }

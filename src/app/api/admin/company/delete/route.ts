@@ -1,63 +1,32 @@
-// src/app/api/admin/company/delete/route.ts
-
-import { NextRequest, NextResponse } from "next/server";
-import { getAuth } from "firebase-admin/auth";
+import { NextResponse } from "next/server";
 import { db } from "@/lib/firebaseAdmin";
+import { getAuth } from "firebase-admin/auth";
+import { doc, deleteDoc } from "firebase-admin/firestore";
 
-/**
- * DELETE /api/admin/company/delete
- * Deletes a company and optionally all linked agents.
- */
-export async function DELETE(req: NextRequest) {
+export async function DELETE(req: Request) {
   try {
-    // Verify Firebase Auth
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader) {
+      return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 });
     }
 
-    const idToken = authHeader.split("Bearer ")[1];
+    const idToken = authHeader.replace("Bearer ", "").trim();
     const decodedToken = await getAuth().verifyIdToken(idToken);
 
-    if (decodedToken.role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!decodedToken.admin) {
+      return NextResponse.json({ error: "Forbidden: Admins only" }, { status: 403 });
     }
 
-    const { companyId, deleteAgents = false } = await req.json();
-
+    const { companyId } = await req.json();
     if (!companyId) {
-      return NextResponse.json(
-        { error: "Missing companyId" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Missing companyId" }, { status: 400 });
     }
 
-    // Delete the company document
-    await db.collection("companies").doc(companyId).delete();
+    await deleteDoc(doc(db, "companies", companyId));
 
-    // Optionally delete all agents linked to this company
-    if (deleteAgents) {
-      const agentsSnapshot = await db
-        .collection("agents")
-        .where("companyId", "==", companyId)
-        .get();
-
-      const batch = db.batch();
-      agentsSnapshot.forEach((doc) => {
-        batch.delete(doc.ref);
-      });
-      await batch.commit();
-    }
-
-    return NextResponse.json({
-      message: `Company ${companyId} deleted successfully`,
-      agentsDeleted: deleteAgents ? "Yes" : "No",
-    });
+    return NextResponse.json({ success: true, message: "Company deleted successfully" }, { status: 200 });
   } catch (error: any) {
     console.error("Error deleting company:", error);
-    return NextResponse.json(
-      { error: "Failed to delete company" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error", details: error.message }, { status: 500 });
   }
 }

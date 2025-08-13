@@ -1,105 +1,91 @@
-import { NextRequest, NextResponse } from 'next/server';
-import Stripe from 'stripe';
-import admin from '@/lib/firebaseAdmin'; // Make sure you have firebaseAdmin.ts configured
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: '2024-06-20',
-});
+import { NextResponse } from "next/server";
+import Stripe from "stripe";
+import { buffer } from "micro";
+import admin from "@/lib/firebaseAdmin";
 
 export const config = {
   api: {
-    bodyParser: false, // Stripe requires raw body
+    bodyParser: false,
   },
 };
 
-function buffer(req: any) {
-  return new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
-  });
-}
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+  apiVersion: "2024-06-20",
+});
 
-export async function POST(req: NextRequest) {
-  const buf = await req.arrayBuffer();
-  const rawBody = Buffer.from(buf);
-  const sig = req.headers.get('stripe-signature');
+export async function POST(req: Request) {
+  const buf = await buffer(req.body as any);
+  const sig = req.headers.get("stripe-signature");
+
+  if (!sig) {
+    return NextResponse.json({ error: "Missing Stripe signature" }, { status: 400 });
+  }
 
   let event: Stripe.Event;
 
   try {
     event = stripe.webhooks.constructEvent(
-      rawBody,
-      sig!,
+      buf,
+      sig,
       process.env.STRIPE_WEBHOOK_SECRET as string
     );
   } catch (err: any) {
-    console.error('Webhook signature verification failed:', err.message);
-    return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
+    console.error("Webhook signature verification failed:", err.message);
+    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object as Stripe.Checkout.Session;
+  try {
+    const db = admin.firestore();
 
-    const packageId = session.metadata?.packageId;
-    const customerId = session.metadata?.customerId;
-    const paymentType = session.metadata?.paymentType;
-    const insuranceOption = session.metadata?.insuranceOption;
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const customerId = session.metadata?.customerId;
+        const paymentType = session.metadata?.paymentType;
 
-    if (!packageId || !customerId || !paymentType) {
-      console.error('Missing metadata in webhook');
-      return NextResponse.json({ received: true });
+        if (!customerId || !paymentType) {
+          throw new Error("Missing customerId or paymentType in session metadata");
+        }
+
+        let updateData: Record<string, any> = {
+          paymentStatus: "paid",
+          stripeSessionId: session.id,
+          paidAt: admin.firestore.Timestamp.now(),
+        };
+
+        if (paymentType === "deposit") {
+          updateData.trips = admin.firestore.FieldValue.increment(1);
+          updateData.timeExtensionMonths = 6;
+          updateData.timerEndsAt = admin.firestore.Timestamp.fromDate(
+            new Date(Date.now() + 6 * 30 * 24 * 60 * 60 * 1000)
+          );
+        } else if (paymentType === "full") {
+          updateData.timerEndsAt = null; // no timer
+          updateData.fullPaid = true;
+        }
+
+        await db.collection("customers").doc(customerId).update(updateData);
+        break;
+      }
+
+      case "checkout.session.expired": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const customerId = session.metadata?.customerId;
+        if (customerId) {
+          await db.collection("customers").doc(customerId).update({
+            paymentStatus: "expired",
+          });
+        }
+        break;
+      }
+
+      default:
+        console.log(`Unhandled event type: ${event.type}`);
     }
 
-    try {
-      const db = admin.firestore();
-      const customerRef = db.collection('customers').doc(customerId);
-
-      // Fetch current customer data
-      const customerDoc = await customerRef.get();
-      if (!customerDoc.exists) {
-        console.error('Customer not found:', customerId);
-        return NextResponse.json({ received: true });
-      }
-
-      const customerData = customerDoc.data() || {};
-
-      let trips = customerData.trips || 0;
-      let expirationDate = customerData.expirationDate
-        ? customerData.expirationDate.toDate()
-        : null;
-
-      const now = new Date();
-
-      if (paymentType === 'deposit') {
-        trips += 1;
-        expirationDate = new Date();
-        expirationDate.setMonth(expirationDate.getMonth() + 6); // 6-month extension
-      } else if (paymentType === 'double') {
-        trips *= 2;
-        expirationDate = new Date();
-        expirationDate.setMonth(expirationDate.getMonth() + 54); // 54-month extension
-      } else if (paymentType === 'full') {
-        expirationDate = null; // No timer
-      }
-
-      if (insuranceOption === 'add') {
-        trips *= 2;
-      }
-
-      await customerRef.update({
-        trips,
-        expirationDate: expirationDate ? admin.firestore.Timestamp.fromDate(expirationDate) : null,
-        paymentStatus: 'paid',
-        lastPaymentDate: admin.firestore.Timestamp.fromDate(now),
-      });
-
-      console.log(`Updated customer ${customerId} after payment`);
-    } catch (err) {
-      console.error('Error updating Firestore from webhook:', err);
-    }
+    return NextResponse.json({ received: true });
+  } catch (err) {
+    console.error("Error handling webhook:", err);
+    return NextResponse.json({ error: "Webhook error" }, { status: 500 });
   }
-
-  return NextResponse.json({ received: true });
 }

@@ -1,13 +1,14 @@
-
 "use client";
 
 import React from "react";
+import Link from "next/link";
 
 interface Agent {
   id: string;
   name: string;
   email: string;
   companyName: string;
+  createdAt: string;
 }
 
 export default function AdminAgentsPage(): JSX.Element {
@@ -30,16 +31,15 @@ export default function AdminAgentsPage(): JSX.Element {
   };
 
   const deleteAgent = async (id: string): Promise<void> => {
-    if (!confirm("Are you sure you want to delete this agent?")) return;
-
+    if (!confirm("Are you sure you want to delete this agent? The agent's packages will remain attached to their company.")) {
+      return;
+    }
     try {
-      const res = await fetch(`/api/admin/agents/${id}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(`/api/admin/agents/${id}`, { method: "DELETE" });
       if (!res.ok) {
         throw new Error(`Failed to delete agent: ${res.statusText}`);
       }
-      setAgents((prev) => prev.filter((a) => a.id !== id));
+      setAgents((prev) => prev.filter((agent) => agent.id !== id));
     } catch (error) {
       console.error("Error deleting agent:", error);
     }
@@ -51,18 +51,19 @@ export default function AdminAgentsPage(): JSX.Element {
 
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Agents</h1>
+      <h1 className="text-2xl font-bold mb-4">Manage Agents</h1>
       {loading ? (
         <p>Loading agents...</p>
       ) : agents.length === 0 ? (
         <p>No agents found.</p>
       ) : (
-        <table className="min-w-full border">
+        <table className="min-w-full bg-white border border-gray-200 rounded shadow">
           <thead>
             <tr className="bg-gray-100 border-b">
               <th className="px-4 py-2 text-left">Name</th>
               <th className="px-4 py-2 text-left">Email</th>
               <th className="px-4 py-2 text-left">Company</th>
+              <th className="px-4 py-2 text-left">Created</th>
               <th className="px-4 py-2 text-left">Actions</th>
             </tr>
           </thead>
@@ -72,10 +73,17 @@ export default function AdminAgentsPage(): JSX.Element {
                 <td className="px-4 py-2">{agent.name}</td>
                 <td className="px-4 py-2">{agent.email}</td>
                 <td className="px-4 py-2">{agent.companyName}</td>
-                <td className="px-4 py-2">
+                <td className="px-4 py-2">{new Date(agent.createdAt).toLocaleDateString()}</td>
+                <td className="px-4 py-2 space-x-2">
+                  <Link
+                    href={`/admin/agents/${agent.id}`}
+                    className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
+                  >
+                    View
+                  </Link>
                   <button
                     onClick={() => deleteAgent(agent.id)}
-                    className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600"
+                    className="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600"
                   >
                     Delete
                   </button>

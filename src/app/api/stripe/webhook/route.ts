@@ -1,80 +1,105 @@
-// src/app/api/stripe/webhook/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { buffer } from 'micro';
-import admin from '@/lib/firebaseAdmin';
+import admin from '@/lib/firebaseAdmin'; // Make sure you have firebaseAdmin.ts configured
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: '2023-10-16',
+  apiVersion: '2024-06-20',
 });
 
 export const config = {
   api: {
-    bodyParser: false,
+    bodyParser: false, // Stripe requires raw body
   },
 };
 
-export async function POST(req: Request) {
+function buffer(req: any) {
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+export async function POST(req: NextRequest) {
+  const buf = await req.arrayBuffer();
+  const rawBody = Buffer.from(buf);
   const sig = req.headers.get('stripe-signature');
-  let event;
+
+  let event: Stripe.Event;
 
   try {
-    const buf = await buffer(req);
     event = stripe.webhooks.constructEvent(
-      buf.toString(),
+      rawBody,
       sig!,
-      process.env.STRIPE_WEBHOOK_SECRET!
+      process.env.STRIPE_WEBHOOK_SECRET as string
     );
   } catch (err: any) {
-    console.error(`Webhook signature verification failed.`, err.message);
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
+    console.error('Webhook signature verification failed:', err.message);
+    return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
   }
 
-  if (process.env.NODE_ENV === 'development') {
-    console.log('🔔 Stripe Event Received:', event.type);
-  }
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object as Stripe.Checkout.Session;
 
-  try {
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object as Stripe.Checkout.Session;
-        const customerId = session.metadata?.customerId;
-        const paymentType = session.metadata?.paymentType;
+    const packageId = session.metadata?.packageId;
+    const customerId = session.metadata?.customerId;
+    const paymentType = session.metadata?.paymentType;
+    const insuranceOption = session.metadata?.insuranceOption;
 
-        if (!customerId || !paymentType) break;
+    if (!packageId || !customerId || !paymentType) {
+      console.error('Missing metadata in webhook');
+      return NextResponse.json({ received: true });
+    }
 
-        const customerRef = admin.firestore().collection('customers').doc(customerId);
+    try {
+      const db = admin.firestore();
+      const customerRef = db.collection('customers').doc(customerId);
 
-        if (paymentType === 'deposit') {
-          await customerRef.update({
-            status: 'deposit',
-            trips: admin.firestore.FieldValue.increment(1),
-            bookingDeadline: admin.firestore.Timestamp.fromDate(
-              new Date(Date.now() + 6 * 30 * 24 * 60 * 60 * 1000)
-            ),
-          });
-        } else if (paymentType === 'double_up') {
-          const customerDoc = await customerRef.get();
-          const trips = customerDoc.data()?.trips || 0;
-          await customerRef.update({
-            status: 'double_up',
-            trips: trips * 2,
-            bookingDeadline: admin.firestore.Timestamp.fromDate(
-              new Date(Date.now() + 54 * 30 * 24 * 60 * 60 * 1000)
-            ),
-          });
-        } else if (paymentType === 'full') {
-          await customerRef.update({
-            status: 'paid',
-            bookingDeadline: null,
-          });
-        }
-        break;
+      // Fetch current customer data
+      const customerDoc = await customerRef.get();
+      if (!customerDoc.exists) {
+        console.error('Customer not found:', customerId);
+        return NextResponse.json({ received: true });
       }
 
-      case 'checkout.session.expired':
-      case 'payment_failed': {
-        const session = event.data.object as Stripe.Checkout.Session;
-        const customerId = session.metadata?.customerId;
-        if (customerId) {
-          await admin.firestore().collection('
+      const customerData = customerDoc.data() || {};
+
+      let trips = customerData.trips || 0;
+      let expirationDate = customerData.expirationDate
+        ? customerData.expirationDate.toDate()
+        : null;
+
+      const now = new Date();
+
+      if (paymentType === 'deposit') {
+        trips += 1;
+        expirationDate = new Date();
+        expirationDate.setMonth(expirationDate.getMonth() + 6); // 6-month extension
+      } else if (paymentType === 'double') {
+        trips *= 2;
+        expirationDate = new Date();
+        expirationDate.setMonth(expirationDate.getMonth() + 54); // 54-month extension
+      } else if (paymentType === 'full') {
+        expirationDate = null; // No timer
+      }
+
+      if (insuranceOption === 'add') {
+        trips *= 2;
+      }
+
+      await customerRef.update({
+        trips,
+        expirationDate: expirationDate ? admin.firestore.Timestamp.fromDate(expirationDate) : null,
+        paymentStatus: 'paid',
+        lastPaymentDate: admin.firestore.Timestamp.fromDate(now),
+      });
+
+      console.log(`Updated customer ${customerId} after payment`);
+    } catch (err) {
+      console.error('Error updating Firestore from webhook:', err);
+    }
+  }
+
+  return NextResponse.json({ received: true });
+}

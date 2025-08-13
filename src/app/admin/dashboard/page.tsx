@@ -1,40 +1,59 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { getRoleFromClaims, hasRole } from "@/lib/roles";
-import Sidebar from "@/components/layout/Sidebar";
+import React from "react";
 
-export default function AdminDashboard() {
-  const auth = getAuth();
-  const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+interface Company {
+  id: string;
+  name: string;
+  agentsCount: number;
+}
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        router.push("/auth/login");
-        return;
+export default function AdminDashboardPage(): JSX.Element {
+  const [companies, setCompanies] = React.useState<Company[]>([]);
+  const [loading, setLoading] = React.useState<boolean>(true);
+
+  React.useEffect(() => {
+    const fetchCompanies = async (): Promise<void> => {
+      try {
+        const res = await fetch("/api/admin/companies");
+        if (!res.ok) {
+          throw new Error(`Failed to fetch companies: ${res.statusText}`);
+        }
+        const data: Company[] = await res.json();
+        setCompanies(data);
+      } catch (error) {
+        console.error("Error fetching companies:", error);
+      } finally {
+        setLoading(false);
       }
-      const role = await getRoleFromClaims(currentUser);
-      const userObj = { ...currentUser, role };
-      if (!hasRole(userObj, "admin")) {
-        router.push("/auth/login");
-        return;
-      }
-      setUser(userObj);
-    });
-    return () => unsub();
-  }, [auth, router]);
+    };
+
+    fetchCompanies();
+  }, []);
 
   return (
-    <div className="flex min-h-screen bg-gray-100">
-      <Sidebar />
-      <main className="flex-1 p-6">
-        <h1 className="text-2xl font-bold mb-4">Admin Dashboard</h1>
-        <p>Welcome, {user?.email}</p>
-      </main>
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-4">Admin Dashboard</h1>
+      {loading ? (
+        <p>Loading companies...</p>
+      ) : (
+        <table className="min-w-full border">
+          <thead>
+            <tr className="bg-gray-100 border-b">
+              <th className="px-4 py-2 text-left">Company Name</th>
+              <th className="px-4 py-2 text-left">Agents</th>
+            </tr>
+          </thead>
+          <tbody>
+            {companies.map((company) => (
+              <tr key={company.id} className="border-b">
+                <td className="px-4 py-2">{company.name}</td>
+                <td className="px-4 py-2">{company.agentsCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

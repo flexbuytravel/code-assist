@@ -1,49 +1,33 @@
-// src/app/api/admin/company/update/route.ts
-
-import { NextRequest, NextResponse } from "next/server";
-import { getAuth } from "firebase-admin/auth";
+import { NextResponse } from "next/server";
 import { db } from "@/lib/firebaseAdmin";
+import { getAuth } from "firebase-admin/auth";
+import { doc, updateDoc } from "firebase-admin/firestore";
 
-/**
- * PATCH /api/admin/company/update
- * Updates a company's details in Firestore.
- */
-export async function PATCH(req: NextRequest) {
+export async function PATCH(req: Request) {
   try {
-    // Verify Firebase Auth
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader) {
+      return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 });
     }
 
-    const idToken = authHeader.split("Bearer ")[1];
+    const idToken = authHeader.replace("Bearer ", "").trim();
     const decodedToken = await getAuth().verifyIdToken(idToken);
 
-    if (decodedToken.role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!decodedToken.admin) {
+      return NextResponse.json({ error: "Forbidden: Admins only" }, { status: 403 });
     }
 
-    const { companyId, updateData } = await req.json();
+    const { companyId, updates } = await req.json();
 
-    if (!companyId || !updateData || typeof updateData !== "object") {
-      return NextResponse.json(
-        { error: "Missing or invalid companyId/updateData" },
-        { status: 400 }
-      );
+    if (!companyId || !updates || typeof updates !== "object") {
+      return NextResponse.json({ error: "Missing or invalid update payload" }, { status: 400 });
     }
 
-    // Merge update data into the existing company doc
-    await db.collection("companies").doc(companyId).set(updateData, { merge: true });
+    await updateDoc(doc(db, "companies", companyId), updates);
 
-    return NextResponse.json({
-      message: `Company ${companyId} updated successfully`,
-      updatedFields: Object.keys(updateData),
-    });
+    return NextResponse.json({ success: true, message: "Company updated successfully" }, { status: 200 });
   } catch (error: any) {
     console.error("Error updating company:", error);
-    return NextResponse.json(
-      { error: "Failed to update company" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error", details: error.message }, { status: 500 });
   }
 }

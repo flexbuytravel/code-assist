@@ -1,90 +1,57 @@
+// src/app/api/stripe/create-checkout-session/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2024-04-10",
 });
 
 export async function POST(req: Request) {
   try {
-    const { packageId, paymentType, insurance } = await req.json();
+    const { packageId, customerId, insuranceType } = await req.json();
 
-    if (!packageId || !paymentType) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
+    if (!packageId || !customerId) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    // 1️⃣ Get package details from Firestore
-    const packageRef = doc(db, "packages", packageId);
-    const packageSnap = await getDoc(packageRef);
+    // Server-side price calculation — no trusting client
+    const basePrice = 998; // promotional price
+    let finalPrice = basePrice;
 
-    if (!packageSnap.exists()) {
-      return NextResponse.json(
-        { error: "Package not found" },
-        { status: 404 }
-      );
-    }
+    if (insuranceType === "deposit") finalPrice += 200;
+    if (insuranceType === "doubleUp") finalPrice += 600;
 
-    const packageData = packageSnap.data();
-    const basePrice = packageData.price || 0;
+    // Stripe requires amounts in cents
+    const amountInCents = finalPrice * 100;
 
-    // 2️⃣ Calculate final price based on type and insurance
-    let finalPrice = 0;
-
-    if (paymentType === "deposit") {
-      finalPrice = 200; // fixed deposit
-    } else if (paymentType === "full") {
-      finalPrice = basePrice;
-    }
-
-    // Insurance add-ons
-    if (insurance === "standard") {
-      finalPrice += 200; // adds one trip
-    } else if (insurance === "doubleUp") {
-      finalPrice += 600; // doubles trips
-    }
-
-    // Convert to cents for Stripe
-    const amountInCents = Math.round(finalPrice * 100);
-
-    // 3️⃣ Create Stripe Checkout Session
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
-      mode: "payment",
       line_items: [
         {
           price_data: {
             currency: "usd",
             product_data: {
-              name: packageData.name || "Travel Package",
-              description: `Agent: ${packageData.agentId}`,
+              name: "Vacation Package",
+              description: `Package ID: ${packageId} — ${insuranceType}`,
             },
             unit_amount: amountInCents,
           },
           quantity: 1,
         },
       ],
+      mode: "payment",
+      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/dashboard?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/payment?packageId=${packageId}&customerId=${customerId}`,
       metadata: {
         packageId,
-        companyId: packageData.companyId,
-        agentId: packageData.agentId,
-        paymentType,
-        insurance,
+        customerId,
+        insuranceType,
       },
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/customer/dashboard?success=true`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/customer/dashboard?canceled=true`,
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (error: any) {
-    console.error("Error creating checkout session:", error);
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
-    );
+  } catch (err: any) {
+    console.error("Stripe Checkout Error:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

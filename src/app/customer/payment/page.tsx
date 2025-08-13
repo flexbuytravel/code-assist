@@ -1,27 +1,20 @@
-// src/app/customer/payment/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
 
-export default function PaymentPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
-  const packageId = searchParams.get("packageId") || "";
-  const customerId = searchParams.get("customerId") || "";
-  const basePrice = 998; // promotional price
-
-  const [insuranceType, setInsuranceType] = useState<"none" | "deposit" | "doubleUp">("none");
-  const [totalPrice, setTotalPrice] = useState(basePrice);
+export default function PaymentPage({ params }: { params: { packageId: string } }) {
+  const [option, setOption] = useState("deposit");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    let price = basePrice;
-    if (insuranceType === "deposit") price += 200;
-    if (insuranceType === "doubleUp") price += 600;
-    setTotalPrice(price);
-  }, [insuranceType]);
+  // Adjust package base price here if needed
+  const basePrice = 998; // promotional package price
+
+  const getTotalPrice = () => {
+    if (option === "deposit") return 200;
+    if (option === "double-up") return basePrice + 600;
+    if (option === "full") return basePrice;
+    return basePrice;
+  };
 
   const handleCheckout = async () => {
     setLoading(true);
@@ -30,77 +23,82 @@ export default function PaymentPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          packageId,
-          customerId,
-          insuranceType,
+          packageId: params.packageId,
+          option,
         }),
       });
 
-      if (!res.ok) throw new Error("Failed to create checkout session");
-
-      const { url } = await res.json();
-      router.push(url);
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert("Failed to start checkout session.");
+      }
     } catch (err) {
-      console.error(err);
-      alert("Error starting payment process.");
-    } finally {
-      setLoading(false);
+      console.error("Error starting checkout:", err);
+      alert("Checkout error");
     }
+    setLoading(false);
   };
 
   return (
-    <div className="max-w-lg mx-auto p-6 bg-white rounded-lg shadow-lg">
-      <h1 className="text-2xl font-bold mb-4">Complete Your Payment</h1>
+    <div style={{ padding: 20 }}>
+      <h1>Complete Your Payment</h1>
+      <p>Package ID: {params.packageId}</p>
 
-      <div className="mb-4">
-        <p className="mb-2">Base Package Price: <strong>${basePrice}</strong></p>
-
-        <div className="space-y-2">
-          <label className="flex items-center">
-            <input
-              type="radio"
-              name="insurance"
-              value="none"
-              checked={insuranceType === "none"}
-              onChange={() => setInsuranceType("none")}
-            />
-            <span className="ml-2">No Add-On</span>
-          </label>
-
-          <label className="flex items-center">
-            <input
-              type="radio"
-              name="insurance"
-              value="deposit"
-              checked={insuranceType === "deposit"}
-              onChange={() => setInsuranceType("deposit")}
-            />
-            <span className="ml-2">Deposit (+$200) — Adds 1 Trip, 6 Months Expiry</span>
-          </label>
-
-          <label className="flex items-center">
-            <input
-              type="radio"
-              name="insurance"
-              value="doubleUp"
-              checked={insuranceType === "doubleUp"}
-              onChange={() => setInsuranceType("doubleUp")}
-            />
-            <span className="ml-2">Double Up (+$600) — Doubles Trips, 54 Months Expiry</span>
-          </label>
-        </div>
+      <div>
+        <label>
+          <input
+            type="radio"
+            name="paymentOption"
+            value="deposit"
+            checked={option === "deposit"}
+            onChange={() => setOption("deposit")}
+          />
+          Deposit - $200
+        </label>
+        <br />
+        <label>
+          <input
+            type="radio"
+            name="paymentOption"
+            value="double-up"
+            checked={option === "double-up"}
+            onChange={() => setOption("double-up")}
+          />
+          Double-Up - ${basePrice + 600}
+        </label>
+        <br />
+        <label>
+          <input
+            type="radio"
+            name="paymentOption"
+            value="full"
+            checked={option === "full"}
+            onChange={() => setOption("full")}
+          />
+          Full Payment - ${basePrice}
+        </label>
       </div>
 
-      <div className="mt-4">
-        <p className="text-lg font-semibold">Total: ${totalPrice}</p>
-      </div>
+      <p style={{ marginTop: 20, fontSize: "1.2rem" }}>
+        <strong>Total: ${getTotalPrice()}</strong>
+      </p>
 
       <button
         onClick={handleCheckout}
         disabled={loading}
-        className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg disabled:opacity-50"
+        style={{
+          padding: "10px 20px",
+          fontSize: "1rem",
+          cursor: "pointer",
+          background: "#0070f3",
+          color: "#fff",
+          border: "none",
+          borderRadius: 4,
+        }}
       >
-        {loading ? "Processing..." : "Pay Now"}
+        {loading ? "Redirecting..." : "Pay Now"}
       </button>
     </div>
   );

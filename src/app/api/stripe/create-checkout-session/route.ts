@@ -1,63 +1,66 @@
-// src/app/api/stripe/create-checkout-session/route.ts
-import { NextResponse } from 'next/server';
-import Stripe from 'stripe';
+import { NextResponse } from "next/server";
+import Stripe from "stripe";
+import admin from "@/lib/firebaseAdmin";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: '2023-10-16',
+  apiVersion: "2024-06-20",
 });
 
 export async function POST(req: Request) {
   try {
-    const { customerId, packageId, paymentType } = await req.json();
+    const { customerId, amountType } = await req.json();
 
-    if (!customerId || !packageId || !paymentType) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      );
+    if (!customerId || !["deposit", "full"].includes(amountType)) {
+      return NextResponse.json({ error: "Invalid parameters" }, { status: 400 });
     }
 
-    // Prices based on your rules
+    const db = admin.firestore();
+    const customerDoc = await db.collection("customers").doc(customerId).get();
+
+    if (!customerDoc.exists) {
+      return NextResponse.json({ error: "Customer not found" }, { status: 404 });
+    }
+
+    const customerData = customerDoc.data();
+    if (!customerData) {
+      return NextResponse.json({ error: "Customer data missing" }, { status: 400 });
+    }
+
     let amount = 0;
-    if (paymentType === 'deposit') {
-      amount = 20000; // $200
-    } else if (paymentType === 'double_up') {
-      amount = 60000; // $600
-    } else if (paymentType === 'full') {
-      // Full payment is based on package price stored in DB or passed in
-      // This assumes it's passed in cents
-      const packagePrice = 100000; // Example $1000
-      amount = packagePrice;
+    let description = "";
+
+    if (amountType === "deposit") {
+      amount = 20000; // $200 in cents
+      description = "Trip Deposit";
+    } else if (amountType === "full") {
+      amount = customerData.fullPrice * 100; // convert to cents
+      description = "Full Trip Payment";
     }
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
+      payment_method_types: ["card"],
+      mode: "payment",
       line_items: [
         {
           price_data: {
-            currency: 'usd',
-            product_data: {
-              name: `Package ${packageId}`,
-              description: `Payment type: ${paymentType}`,
-            },
+            currency: "usd",
+            product_data: { name: description },
             unit_amount: amount,
           },
           quantity: 1,
         },
       ],
-      mode: 'payment',
-      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment-canceled`,
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/payment-success`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/payment-cancel`,
       metadata: {
         customerId,
-        packageId,
-        paymentType,
+        paymentType: amountType,
       },
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (err: any) {
-    console.error('Error creating checkout session:', err);
-    return NextResponse.json({ error: 'Unable to create checkout session' }, { status: 500 });
+  } catch (error) {
+    console.error("Error creating checkout session:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -1,49 +1,31 @@
-// src/app/api/admin/company/list/route.ts
-
-import { NextRequest, NextResponse } from "next/server";
-import { getAuth } from "firebase-admin/auth";
+import { NextResponse } from "next/server";
 import { db } from "@/lib/firebaseAdmin";
+import { getAuth } from "firebase-admin/auth";
+import { collection, getDocs } from "firebase-admin/firestore";
 
-/**
- * GET /api/admin/company/list
- * Lists all companies in Firestore.
- */
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   try {
-    // Verify Firebase Auth
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader) {
+      return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 });
     }
 
-    const idToken = authHeader.split("Bearer ")[1];
+    const idToken = authHeader.replace("Bearer ", "").trim();
     const decodedToken = await getAuth().verifyIdToken(idToken);
 
-    if (decodedToken.role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!decodedToken.admin) {
+      return NextResponse.json({ error: "Forbidden: Admins only" }, { status: 403 });
     }
 
-    // Fetch companies from Firestore
-    const companiesSnapshot = await db.collection("companies").get();
-    const companies: Record<string, any>[] = [];
+    const companiesSnapshot = await getDocs(collection(db, "companies"));
+    const companies = companiesSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
 
-    companiesSnapshot.forEach((doc) => {
-      companies.push({
-        id: doc.id,
-        ...doc.data(),
-      });
-    });
-
-    return NextResponse.json({
-      message: "Companies fetched successfully",
-      count: companies.length,
-      data: companies,
-    });
+    return NextResponse.json({ companies }, { status: 200 });
   } catch (error: any) {
-    console.error("Error listing companies:", error);
-    return NextResponse.json(
-      { error: "Failed to list companies" },
-      { status: 500 }
-    );
+    console.error("Error fetching companies:", error);
+    return NextResponse.json({ error: "Internal server error", details: error.message }, { status: 500 });
   }
 }

@@ -1,36 +1,48 @@
-import { NextResponse } from "next/server";
-import { firestore } from "@/lib/firebase"; // Client SDK for emulator/local dev
-import { collection, getDocs } from "firebase/firestore";
+// src/app/api/admin/company/list/route.ts
 
-// Middleware-like helper for role-based access
-async function requireAdmin(user: any) {
-  if (!user || user.role !== "admin") {
-    throw new Error("Unauthorized: Admin access required");
-  }
-}
+import { NextRequest, NextResponse } from "next/server";
+import { getAuth } from "firebase-admin/auth";
+import { db } from "@/lib/firebaseAdmin";
 
-export async function GET(req: Request) {
+/**
+ * GET /api/admin/company/list
+ * Lists all companies in Firestore.
+ */
+export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const userParam = searchParams.get("user");
-    const user = userParam ? JSON.parse(userParam) : null;
+    // Verify Firebase Auth
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    // Role check
-    await requireAdmin(user);
+    const idToken = authHeader.split("Bearer ")[1];
+    const decodedToken = await getAuth().verifyIdToken(idToken);
 
-    const companiesRef = collection(firestore, "companies");
-    const snapshot = await getDocs(companiesRef);
+    if (decodedToken.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
-    const companies = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    // Fetch companies from Firestore
+    const companiesSnapshot = await db.collection("companies").get();
+    const companies: Record<string, any>[] = [];
 
-    return NextResponse.json({ companies });
+    companiesSnapshot.forEach((doc) => {
+      companies.push({
+        id: doc.id,
+        ...doc.data(),
+      });
+    });
+
+    return NextResponse.json({
+      message: "Companies fetched successfully",
+      count: companies.length,
+      data: companies,
+    });
   } catch (error: any) {
     console.error("Error listing companies:", error);
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      { error: "Failed to list companies" },
       { status: 500 }
     );
   }

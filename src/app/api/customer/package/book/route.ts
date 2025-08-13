@@ -1,77 +1,58 @@
 // src/app/api/customer/package/book/route.ts
 
-import { NextResponse } from "next/server";
-import { auth, firestore } from "@/lib/firebase";
-import { doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
-import { createUserWithEmailAndPassword } from "firebase/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { auth as firebaseAuth } from "@/lib/firebase"; // Firebase client
+import { db } from "@/lib/firebaseAdmin"; // Firebase Admin SDK for server-side
+import { collection, addDoc, Timestamp } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
 
 /**
  * POST /api/customer/package/book
- * Books a package for a customer.
- * Expected body: { email, password, packageId, bookingData }
+ * Allows an authenticated CUSTOMER to book a travel package.
  */
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { email, password, packageId, bookingData } = body;
+    // Verify Firebase Auth ID Token
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    if (!email || !password || !packageId || !bookingData) {
+    const idToken = authHeader.split("Bearer ")[1];
+    const decodedToken = await getAuth().verifyIdToken(idToken);
+
+    // Role check — must be 'customer'
+    if (decodedToken.role !== "customer") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { packageId, options } = await req.json();
+
+    if (!packageId) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Package ID is required" },
         { status: 400 }
       );
     }
 
-    // Check if the package exists
-    const packageRef = doc(firestore, "packages", packageId);
-    const packageSnap = await getDoc(packageRef);
-
-    if (!packageSnap.exists()) {
-      return NextResponse.json(
-        { error: "Package not found" },
-        { status: 404 }
-      );
-    }
-
-    // Create the customer in Firebase Auth
-    const userCredential = await createUserWithEmailAndPassword(
-      auth,
-      email,
-      password
-    );
-    const uid = userCredential.user.uid;
-
-    // Store booking data under the customer's document
-    const customerRef = doc(firestore, "customers", uid);
-    await setDoc(customerRef, {
-      email,
-      createdAt: new Date().toISOString(),
-    });
-
-    // Create a booking record
-    const bookingRef = doc(firestore, "bookings", `${uid}_${packageId}`);
-    await setDoc(bookingRef, {
-      uid,
+    // Add booking document
+    const bookingsRef = db.collection("bookings");
+    const bookingDoc = await bookingsRef.add({
+      userId: decodedToken.uid,
       packageId,
-      bookingData,
+      options: options || {},
       status: "pending",
-      createdAt: new Date().toISOString(),
-    });
-
-    // Optional: Update package's booked count
-    await updateDoc(packageRef, {
-      bookedCount: (packageSnap.data().bookedCount || 0) + 1,
+      createdAt: Timestamp.now(),
     });
 
     return NextResponse.json({
       success: true,
-      message: "Package booked successfully",
-      bookingId: `${uid}_${packageId}`,
+      bookingId: bookingDoc.id,
     });
   } catch (error: any) {
     console.error("Error booking package:", error);
     return NextResponse.json(
-      { error: error.message || "Internal Server Error" },
+      { error: "Failed to book package" },
       { status: 500 }
     );
   }

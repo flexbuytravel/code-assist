@@ -1,30 +1,23 @@
-
-import { initializeApp, getApp, getApps, FirebaseApp } from "firebase/app";
-import { getAuth, Auth } from "firebase/auth";
-import { getFirestore, Firestore } from "firebase/firestore";
+import { getApps, initializeApp } from "firebase/app";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getStorage, connectStorageEmulator } from "firebase/storage";
 
 const firebaseConfig = {
-  projectId: "flexwave-deals",
-  appId: "1:189754515716:web:a4798182774bef79607051",
-  storageBucket: "flexwave-deals.firebasestorage.app",
-  apiKey: "AIzaSyAwmt6EkyZLsF3XV3iL4pUmDKixEzNK4GE",
-  authDomain: "flexwave-deals.firebaseapp.com",
-  messagingSenderId: "189754515716",
+  apiKey: "fake-api-key", // Emulator ignores this
+  authDomain: "localhost",
+  projectId: "demo-project-id", // Matches your local emulator projectId
+  storageBucket: "demo-project-id.appspot.com",
 };
 
-// Singleton pattern for Firebase services
-let app: FirebaseApp;
-let auth: Auth;
-let db: Firestore;
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApps()[0];
 
-if (!getApps().length) {
-    app = initializeApp(firebaseConfig);
-} else {
-    app = getApp();
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const storage = getStorage(app);
+
+if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true") {
+  connectAuthEmulator(auth, "http://localhost:9099");
+  connectFirestoreEmulator(db, "localhost", 8080);
+  connectStorageEmulator(storage, "localhost", 9199);
 }
-
-auth = getAuth(app);
-db = getFirestore(app);
-
-export { app, auth, db };
-

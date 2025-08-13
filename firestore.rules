@@ -1,83 +1,68 @@
-// Firestore Security Rules for FlexBuy Travel
-
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // =========================
-    // USER DOCUMENTS
-    // =========================
-    match /users/{userId} {
-      allow read: if request.auth != null && (
-        request.auth.token.role == 'admin' ||
-        request.auth.uid == userId
-      );
-
-      allow create: if request.auth != null;
-      allow update: if request.auth.uid == userId || request.auth.token.role == 'admin';
-      allow delete: if request.auth.token.role == 'admin';
+    // ==============================
+    // AUTHENTICATION REQUIREMENTS
+    // ==============================
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // =========================
-    // COMPANIES
-    // =========================
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.role == 'admin';
+    }
+
+    function isCompany() {
+      return isSignedIn() && request.auth.token.role == 'company';
+    }
+
+    function isAgent() {
+      return isSignedIn() && request.auth.token.role == 'agent';
+    }
+
+    function isCustomer(customerId) {
+      return isSignedIn() && request.auth.uid == customerId;
+    }
+
+    // Allow admins full read/write access
     match /companies/{companyId} {
-      allow read: if request.auth != null;
-      allow create, update, delete: if request.auth.token.role == 'admin';
+      allow read, write: if isAdmin();
     }
 
-    // =========================
-    // AGENTS
-    // =========================
+    // Company manages its agents
     match /companies/{companyId}/agents/{agentId} {
-      allow read: if request.auth != null;
-      allow create, update, delete: if request.auth.token.role == 'company' &&
-        request.auth.token.companyId == companyId;
+      allow read: if isCompany() && request.auth.uid == companyId;
+      allow write: if isCompany() && request.auth.uid == companyId;
     }
 
-    // =========================
-    // PACKAGES
-    // =========================
+    // Agents can create packages for their company
     match /companies/{companyId}/packages/{packageId} {
-      allow read: if request.auth != null;
-
-      // Agents of the company can create packages
-      allow create: if request.auth.token.role == 'agent' &&
-        request.auth.token.companyId == companyId;
-
-      // Update rules
-      allow update: if (
-        // Agent of company can update before it's claimed
-        (request.auth.token.role == 'agent' &&
-         request.auth.token.companyId == companyId &&
-         !resource.data.claimed) ||
-
-        // Only Stripe webhook (server) can mark deposit/full paid
-        (request.auth.token.role == 'server') ||
-
-        // Admin can override
-        request.auth.token.role == 'admin'
-      );
-
-      // Delete only by admin or company
-      allow delete: if request.auth.token.role in ['admin', 'company'] &&
-        request.auth.token.companyId == companyId;
+      allow read: if isSignedIn();
+      allow write: if isAgent();
     }
 
-    // =========================
-    // CLAIMED PACKAGES (Customer Flow)
-    // =========================
-    match /customers/{customerId}/claimedPackages/{packageId} {
-      allow read: if request.auth != null && request.auth.uid == customerId;
+    // ==============================
+    // CUSTOMER DATA
+    // ==============================
+    match /customers/{customerId} {
+      // Customers can read their own record
+      allow read: if isCustomer(customerId);
 
-      // Only server (Stripe webhook) can create after payment
-      allow create: if request.auth.token.role == 'server';
+      // Customers can update their own profile — but not payment fields
+      allow update: if isCustomer(customerId) &&
+        !( 'paymentStatus' in request.resource.data ||
+           'trips' in request.resource.data ||
+           'expirationDate' in request.resource.data ||
+           'lastPaymentDate' in request.resource.data );
 
-      // Customer cannot update claimed status manually
-      allow update: if false;
+      // Stripe webhook or backend service account updates payment-related fields
+      allow update: if request.auth.token.firebase.sign_in_provider == "custom" &&
+        request.auth.token.role == 'server';
 
-      // Delete by admin only
-      allow delete: if request.auth.token.role == 'admin';
+      // Admins can still manage everything if needed
+      allow write: if isAdmin();
     }
+
   }
 }

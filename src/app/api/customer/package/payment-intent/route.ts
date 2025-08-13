@@ -29,10 +29,21 @@ export async function POST(req: Request) {
       );
     }
 
-    // Determine package price based on insurance selection
+    // Pricing logic based on your promo rules
     const basePrice = 99800; // $998 in cents
-    const insurancePrice =
-      insuranceOption === "doubleUp" ? 60000 : 20000; // $600 or $200 in cents
+    let insurancePrice = 0;
+
+    if (insuranceOption === "standard") {
+      insurancePrice = 20000; // $200 in cents
+    } else if (insuranceOption === "doubleUp") {
+      insurancePrice = 60000; // $600 in cents
+    } else {
+      return NextResponse.json(
+        { error: "Invalid insurance option" },
+        { status: 400 }
+      );
+    }
+
     const totalAmount = basePrice + insurancePrice;
 
     // Create Stripe PaymentIntent

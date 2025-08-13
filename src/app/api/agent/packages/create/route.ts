@@ -1,64 +1,48 @@
 import { NextResponse } from "next/server";
-import { firestore } from "@/lib/firebase";
-import { doc, setDoc, getDoc } from "firebase/firestore";
-import { v4 as uuidv4 } from "uuid";
+import { db } from "@/lib/firebase-admin";
+import { authMiddleware } from "@/lib/auth-middleware";
 
-export async function POST(req: Request) {
+export const POST = authMiddleware(async (req, user) => {
   try {
-    const { name, price, referralId, agentId } = await req.json();
-
-    if (!name || !price || !referralId || !agentId) {
-      return NextResponse.json(
-        { success: false, message: "Missing required fields" },
-        { status: 400 }
-      );
+    if (user.role !== "agent") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    // TODO: Add auth validation (role: 'agent' or 'company')
+    const body = await req.json();
+    const { title, description, trips, price } = body;
 
-    // Get agent data to link companyId
-    const agentRef = doc(firestore, "agents", agentId);
-    const agentSnap = await getDoc(agentRef);
-    if (!agentSnap.exists()) {
-      return NextResponse.json(
-        { success: false, message: "Agent not found" },
-        { status: 404 }
-      );
+    if (!title || !description || !trips || !price) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    const agentData = agentSnap.data();
-    const companyId = agentData.companyId;
-    if (!companyId) {
-      return NextResponse.json(
-        { success: false, message: "Agent is not linked to a company" },
-        { status: 400 }
-      );
+    // Get the agent's company
+    const agentDoc = await db.collection("agents").doc(user.uid).get();
+    if (!agentDoc.exists) {
+      return NextResponse.json({ error: "Agent profile not found" }, { status: 404 });
     }
 
-    // Create package with UUID
-    const packageId = uuidv4();
-    await setDoc(doc(firestore, "packages", packageId), {
-      packageId,
-      name,
+    const { companyId } = agentDoc.data();
+
+    // Create package
+    const packageData = {
+      title,
+      description,
+      trips,
       price,
-      referralId,
-      agentId,
+      agentId: user.uid,
       companyId,
       createdAt: new Date().toISOString(),
-      claimed: false,
-      depositPaid: false,
-    });
+      updatedAt: new Date().toISOString(),
+    };
+
+    const newPackageRef = await db.collection("packages").add(packageData);
 
     return NextResponse.json({
-      success: true,
       message: "Package created successfully",
-      data: { packageId, name, price, referralId, agentId, companyId },
+      packageId: newPackageRef.id,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error creating package:", error);
-    return NextResponse.json(
-      { success: false, message: error.message || "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to create package" }, { status: 500 });
   }
-}
+});

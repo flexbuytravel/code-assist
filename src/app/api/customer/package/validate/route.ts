@@ -1,47 +1,51 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseAdmin";
+import { db } from "@/lib/firebaseAdmin"; // Corrected to match actual file name
+import { doc, getDoc } from "firebase/firestore";
 
-export async function POST(req: Request) {
+/**
+ * POST /api/customer/package/validate
+ * Validates that a given package ID exists and is available for booking
+ */
+export async function POST(request: Request) {
   try {
-    const body = await req.json();
-    const { packageId, referralCode } = body;
+    const { packageId } = await request.json();
 
-    if (!packageId || !referralCode) {
-      return NextResponse.json({ error: "Package ID and referral code are required" }, { status: 400 });
+    if (!packageId) {
+      return NextResponse.json(
+        { success: false, error: "Missing packageId" },
+        { status: 400 }
+      );
     }
 
-    // Look up the package
-    const packageDoc = await db.collection("packages").doc(packageId).get();
-    if (!packageDoc.exists) {
-      return NextResponse.json({ error: "Package not found" }, { status: 404 });
+    const packageRef = doc(db, "packages", packageId);
+    const packageSnap = await getDoc(packageRef);
+
+    if (!packageSnap.exists()) {
+      return NextResponse.json(
+        { success: false, error: "Package not found" },
+        { status: 404 }
+      );
     }
 
-    const packageData = packageDoc.data();
+    const packageData = packageSnap.data();
 
-    // Check referral code matches agent's referral code
-    const agentDoc = await db.collection("agents").doc(packageData.agentId).get();
-    if (!agentDoc.exists) {
-      return NextResponse.json({ error: "Agent not found" }, { status: 404 });
+    // Optional: add extra validation rules here
+    if (packageData.status !== "active") {
+      return NextResponse.json(
+        { success: false, error: "Package is not available" },
+        { status: 403 }
+      );
     }
 
-    const agentData = agentDoc.data();
-    if (agentData.referralCode !== referralCode) {
-      return NextResponse.json({ error: "Invalid referral code" }, { status: 400 });
-    }
-
-    // ✅ Package is valid - return details for registration form
-    return NextResponse.json({
-      packageId,
-      title: packageData.title,
-      description: packageData.description,
-      trips: packageData.trips,
-      price: packageData.price,
-      agentName: agentData.name,
-      companyId: packageData.companyId
-    });
-
-  } catch (error) {
+    return NextResponse.json(
+      { success: true, package: packageData },
+      { status: 200 }
+    );
+  } catch (error: any) {
     console.error("Error validating package:", error);
-    return NextResponse.json({ error: "Failed to validate package" }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }

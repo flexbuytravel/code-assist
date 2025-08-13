@@ -1,34 +1,28 @@
 {
-  "name": "flexbuytravel-vs-builds",
+  "name": "flexbuytravel",
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --host 0.0.0.0",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "emulators": "firebase emulators:start"
+    "lint": "next lint"
   },
   "dependencies": {
-    "@eslint-react": "latest",
-    "@next": "latest",
-    "@radix-ui": "latest",
-    "cors": "latest",
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "firebase": "latest",
-    "axios": "latest",
-    "clsx": "latest",
-    "date-fns": "latest",
-    "zustand": "latest"
+    "@stripe/stripe-js": "^1.54.0",
+    "firebase": "^10.8.0",
+    "firebase-admin": "^11.10.1",
+    "next": "13.5.6",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "stripe": "^14.8.0"
   },
   "devDependencies": {
-    "eslint": "latest",
-    "eslint-config-next": "latest",
-    "typescript": "latest",
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest"
+    "@types/node": "^20.9.0",
+    "@types/react": "^18.2.31",
+    "@types/react-dom": "^18.2.14",
+    "eslint": "8.52.0",
+    "eslint-config-next": "13.5.6",
+    "typescript": "^5.2.2"
   }
 }

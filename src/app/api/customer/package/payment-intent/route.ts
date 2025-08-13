@@ -1,61 +1,70 @@
 // src/app/api/customer/package/payment-intent/route.ts
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { firestore } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { getAuth } from "firebase-admin/auth";
+import { db } from "@/lib/firebaseAdmin";
 
-// Load Stripe with your test secret key
+// Use your Stripe test secret key
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2024-06-20",
 });
 
 /**
  * POST /api/customer/package/payment-intent
- * Creates a payment intent for a package booking
- * Expected body: { packageId, customerId, amount }
+ * Creates a Stripe PaymentIntent for the given package.
  */
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { packageId, customerId, amount } = body;
+    // Verify Firebase Auth ID Token
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    if (!packageId || !customerId || !amount) {
+    const idToken = authHeader.split("Bearer ")[1];
+    const decodedToken = await getAuth().verifyIdToken(idToken);
+
+    // Role check — must be 'customer'
+    if (decodedToken.role !== "customer") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { packageId, amount, currency } = await req.json();
+
+    if (!packageId || !amount) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Package ID and amount are required" },
         { status: 400 }
       );
     }
 
-    // Validate package exists
-    const packageRef = doc(firestore, "packages", packageId);
-    const packageSnap = await getDoc(packageRef);
-
-    if (!packageSnap.exists()) {
+    // Optional: Validate packageId exists in Firestore
+    const packageDoc = await db.collection("packages").doc(packageId).get();
+    if (!packageDoc.exists) {
       return NextResponse.json(
         { error: "Package not found" },
         { status: 404 }
       );
     }
 
-    // Create payment intent with Stripe
+    // Create Stripe PaymentIntent
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // Convert to cents
-      currency: "usd",
+      amount,
+      currency: currency || "usd",
       metadata: {
         packageId,
-        customerId,
+        userId: decodedToken.uid,
       },
     });
 
     return NextResponse.json({
-      success: true,
       clientSecret: paymentIntent.client_secret,
     });
   } catch (error: any) {
     console.error("Error creating payment intent:", error);
     return NextResponse.json(
-      { error: error.message || "Internal Server Error" },
+      { error: "Failed to create payment intent" },
       { status: 500 }
     );
   }

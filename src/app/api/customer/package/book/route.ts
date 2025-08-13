@@ -1,58 +1,49 @@
-// src/app/api/customer/package/book/route.ts
+import { NextResponse } from "next/server";
+import { getAuth } from "firebase/auth";
+import { db } from "@/lib/firebaseAdmin"; // fixed import
+import { doc, setDoc } from "firebase-admin/firestore";
 
-import { NextRequest, NextResponse } from "next/server";
-import { auth as firebaseAuth } from "@/lib/firebase"; // Firebase client
-import { db } from "@/lib/firebaseAdmin"; // Firebase Admin SDK for server-side
-import { collection, addDoc, Timestamp } from "firebase-admin/firestore";
-import { getAuth } from "firebase-admin/auth";
-
-/**
- * POST /api/customer/package/book
- * Allows an authenticated CUSTOMER to book a travel package.
- */
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    // Verify Firebase Auth ID Token
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    // Ensure Firebase Auth is initialized in emulator mode
+    const auth = getAuth();
 
-    const idToken = authHeader.split("Bearer ")[1];
-    const decodedToken = await getAuth().verifyIdToken(idToken);
-
-    // Role check — must be 'customer'
-    if (decodedToken.role !== "customer") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const { packageId, options } = await req.json();
-
-    if (!packageId) {
+    const user = auth.currentUser;
+    if (!user) {
       return NextResponse.json(
-        { error: "Package ID is required" },
+        { error: "Unauthorized: No authenticated customer" },
+        { status: 401 }
+      );
+    }
+
+    const { packageId, customerData } = await req.json();
+
+    // Basic payload validation
+    if (!packageId || !customerData) {
+      return NextResponse.json(
+        { error: "Missing required fields: packageId or customerData" },
         { status: 400 }
       );
     }
 
-    // Add booking document
-    const bookingsRef = db.collection("bookings");
-    const bookingDoc = await bookingsRef.add({
-      userId: decodedToken.uid,
+    // Create a booking doc in Firestore
+    const bookingRef = doc(db, "bookings", `${user.uid}_${packageId}`);
+
+    await setDoc(bookingRef, {
       packageId,
-      options: options || {},
+      customerData,
       status: "pending",
-      createdAt: Timestamp.now(),
+      createdAt: new Date().toISOString(),
     });
 
-    return NextResponse.json({
-      success: true,
-      bookingId: bookingDoc.id,
-    });
-  } catch (error: any) {
-    console.error("Error booking package:", error);
     return NextResponse.json(
-      { error: "Failed to book package" },
+      { message: "Booking created successfully" },
+      { status: 200 }
+    );
+  } catch (error: any) {
+    console.error("Error creating booking:", error);
+    return NextResponse.json(
+      { error: "Internal server error", details: error.message },
       { status: 500 }
     );
   }

@@ -1,0 +1,10 @@
+"use client";
+
+export default function PaymentCancelPage() {
+  return (
+    <div style={{ textAlign: "center", marginTop: "50px" }}>
+      <h1>Payment Cancelled</h1>
+      <p>Your payment was cancelled. You can try again at any time.</p>
+    </div>
+  );
+}

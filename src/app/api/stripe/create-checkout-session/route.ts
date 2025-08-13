@@ -1,79 +1,63 @@
-import Stripe from "stripe";
-import { NextResponse } from "next/server";
-import { db } from "@/lib/firebase-admin";
+// src/app/api/stripe/create-checkout-session/route.ts
+import { NextResponse } from 'next/server';
+import Stripe from 'stripe';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: "2024-06-20", // make sure this matches your Stripe account version
+  apiVersion: '2023-10-16',
 });
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { packageId, depositOption, doubleUpOption } = body;
+    const { customerId, packageId, paymentType } = await req.json();
 
-    if (!packageId) {
-      return NextResponse.json({ error: "Package ID is required" }, { status: 400 });
+    if (!customerId || !packageId || !paymentType) {
+      return NextResponse.json(
+        { error: 'Missing required fields' },
+        { status: 400 }
+      );
     }
 
-    // Load package from Firestore
-    const packageDoc = await db.collection("packages").doc(packageId).get();
-    if (!packageDoc.exists) {
-      return NextResponse.json({ error: "Package not found" }, { status: 404 });
+    // Prices based on your rules
+    let amount = 0;
+    if (paymentType === 'deposit') {
+      amount = 20000; // $200
+    } else if (paymentType === 'double_up') {
+      amount = 60000; // $600
+    } else if (paymentType === 'full') {
+      // Full payment is based on package price stored in DB or passed in
+      // This assumes it's passed in cents
+      const packagePrice = 100000; // Example $1000
+      amount = packagePrice;
     }
 
-    const packageData = packageDoc.data();
-
-    // Calculate price
-    let finalPrice = packageData.price; // base package price in USD
-    let trips = packageData.trips;
-    let bookingWindowMonths = packageData.bookingWindowMonths || 0;
-
-    if (depositOption) {
-      finalPrice = 200;
-      trips += 1;
-      bookingWindowMonths += 6;
-    }
-
-    if (doubleUpOption) {
-      finalPrice = 600;
-      trips *= 2;
-      bookingWindowMonths = 54; // overrides
-    }
-
-    // Create Stripe Checkout session
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
+      payment_method_types: ['card'],
       line_items: [
         {
           price_data: {
-            currency: "usd",
+            currency: 'usd',
             product_data: {
-              name: packageData.title,
-              description: packageData.description,
+              name: `Package ${packageId}`,
+              description: `Payment type: ${paymentType}`,
             },
-            unit_amount: finalPrice * 100, // Stripe expects cents
+            unit_amount: amount,
           },
           quantity: 1,
         },
       ],
-      mode: "payment",
-      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/dashboard?status=success`,
-      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/customer/dashboard?status=cancelled`,
+      mode: 'payment',
+      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment-canceled`,
       metadata: {
+        customerId,
         packageId,
-        agentId: packageData.agentId,
-        companyId: packageData.companyId,
-        trips,
-        bookingWindowMonths,
-        depositOption,
-        doubleUpOption,
+        paymentType,
       },
     });
 
     return NextResponse.json({ url: session.url });
-
-  } catch (error) {
-    console.error("Stripe session error:", error);
-    return NextResponse.json({ error: "Unable to create checkout session" }, { status: 500 });
+  } catch (err: any) {
+    console.error('Error creating checkout session:', err);
+    return NextResponse.json({ error: 'Unable to create checkout session' }, { status: 500 });
   }
 }

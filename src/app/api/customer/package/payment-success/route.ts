@@ -21,4 +21,28 @@ export async function POST(req: Request) {
     }
 
     // Retrieve the checkout session from Stripe
-    const session
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+
+    if (session.payment_status !== "paid") {
+      return NextResponse.json(
+        { error: "Payment not completed" },
+        { status: 400 }
+      );
+    }
+
+    // Update booking record in Firestore (emulator or live)
+    await updateDoc(doc(firestore, "bookings", bookingId), {
+      paymentStatus: "paid",
+      stripeSessionId: session_id,
+      updatedAt: new Date().toISOString(),
+    });
+
+    return NextResponse.json({ success: true, session });
+  } catch (error: any) {
+    console.error("Error confirming payment:", error);
+    return NextResponse.json(
+      { error: "Internal server error", details: error.message },
+      { status: 500 }
+    );
+  }
+}

@@ -1,81 +1,61 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { getAuth } from "firebase/auth";
-import { db } from "@/lib/firebaseAdmin";
-import { doc, setDoc } from "firebase-admin/firestore";
+import { adminDb } from "@/lib/firebaseAdmin"; // Correct import
+import { doc, getDoc } from "firebase-admin/firestore";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: "2024-06-20", // latest stable
+  apiVersion: "2024-06-20",
 });
 
-export async function POST(req: Request) {
+/**
+ * POST /api/customer/package/payment-intent
+ * Creates a Stripe PaymentIntent for a given package
+ */
+export async function POST(request: Request) {
   try {
-    const auth = getAuth();
-    const user = auth.currentUser;
+    const { packageId } = await request.json();
 
-    if (!user) {
+    if (!packageId) {
       return NextResponse.json(
-        { error: "Unauthorized: No authenticated customer" },
-        { status: 401 }
-      );
-    }
-
-    const { packageId, insuranceOption } = await req.json();
-
-    if (!packageId || !insuranceOption) {
-      return NextResponse.json(
-        { error: "Missing required fields: packageId or insuranceOption" },
+        { success: false, error: "Missing packageId" },
         { status: 400 }
       );
     }
 
-    // Pricing logic based on your promo rules
-    const basePrice = 99800; // $998 in cents
-    let insurancePrice = 0;
+    // Fetch package from Firestore
+    const packageRef = doc(adminDb, "packages", packageId);
+    const packageSnap = await getDoc(packageRef);
 
-    if (insuranceOption === "standard") {
-      insurancePrice = 20000; // $200 in cents
-    } else if (insuranceOption === "doubleUp") {
-      insurancePrice = 60000; // $600 in cents
-    } else {
+    if (!packageSnap.exists()) {
       return NextResponse.json(
-        { error: "Invalid insurance option" },
+        { success: false, error: "Package not found" },
+        { status: 404 }
+      );
+    }
+
+    const packageData = packageSnap.data();
+    if (!packageData.price || typeof packageData.price !== "number") {
+      return NextResponse.json(
+        { success: false, error: "Invalid package price" },
         { status: 400 }
       );
     }
 
-    const totalAmount = basePrice + insurancePrice;
-
-    // Create Stripe PaymentIntent
+    // Create Stripe payment intent
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: totalAmount,
+      amount: packageData.price * 100, // convert to cents
       currency: "usd",
-      metadata: {
-        userId: user.uid,
-        packageId,
-        insuranceOption,
-      },
-    });
-
-    // Save payment attempt in Firestore
-    const paymentRef = doc(db, "payments", paymentIntent.id);
-    await setDoc(paymentRef, {
-      userId: user.uid,
-      packageId,
-      insuranceOption,
-      amount: totalAmount,
-      status: "created",
-      createdAt: new Date().toISOString(),
+      metadata: { packageId },
     });
 
     return NextResponse.json(
-      { clientSecret: paymentIntent.client_secret },
+      { success: true, clientSecret: paymentIntent.client_secret },
       { status: 200 }
     );
   } catch (error: any) {
-    console.error("Error creating PaymentIntent:", error);
+    console.error("Error creating payment intent:", error);
     return NextResponse.json(
-      { error: "Internal server error", details: error.message },
+      { success: false, error: "Internal server error" },
       { status: 500 }
     );
   }

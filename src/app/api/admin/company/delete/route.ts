@@ -1,32 +1,52 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseAdmin";
-import { getAuth } from "firebase-admin/auth";
-import { doc, deleteDoc } from "firebase-admin/firestore";
+import { adminDb, adminAuth } from "@/lib/firebaseAdmin"; // Correct imports
+import { doc, deleteDoc, collection, getDocs, query, where } from "firebase-admin/firestore";
 
-export async function DELETE(req: Request) {
+/**
+ * DELETE /api/admin/company/delete
+ * Deletes a company and any related agents
+ */
+export async function POST(request: Request) {
   try {
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader) {
-      return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 });
+    const { companyId, adminUid } = await request.json();
+
+    if (!companyId || !adminUid) {
+      return NextResponse.json(
+        { success: false, error: "Missing companyId or adminUid" },
+        { status: 400 }
+      );
     }
 
-    const idToken = authHeader.replace("Bearer ", "").trim();
-    const decodedToken = await getAuth().verifyIdToken(idToken);
-
-    if (!decodedToken.admin) {
-      return NextResponse.json({ error: "Forbidden: Admins only" }, { status: 403 });
+    // Verify admin privileges
+    const adminUser = await adminAuth.getUser(adminUid);
+    if (!adminUser.customClaims || adminUser.customClaims.role !== "admin") {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 403 }
+      );
     }
 
-    const { companyId } = await req.json();
-    if (!companyId) {
-      return NextResponse.json({ error: "Missing companyId" }, { status: 400 });
+    // Delete company
+    await deleteDoc(doc(adminDb, "companies", companyId));
+
+    // Find and delete related agents
+    const agentsRef = collection(adminDb, "agents");
+    const q = query(agentsRef, where("companyId", "==", companyId));
+    const snapshot = await getDocs(q);
+
+    for (const agentDoc of snapshot.docs) {
+      await deleteDoc(doc(adminDb, "agents", agentDoc.id));
     }
 
-    await deleteDoc(doc(db, "companies", companyId));
-
-    return NextResponse.json({ success: true, message: "Company deleted successfully" }, { status: 200 });
+    return NextResponse.json(
+      { success: true, message: "Company and related agents deleted" },
+      { status: 200 }
+    );
   } catch (error: any) {
     console.error("Error deleting company:", error);
-    return NextResponse.json({ error: "Internal server error", details: error.message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }

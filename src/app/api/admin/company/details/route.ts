@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { db } from "@/lib/firebaseAdmin";
 import { doc, getDoc } from "firebase-admin/firestore";
 
-export async function POST(request: Request) {
+/**
+ * GET /api/admin/company/details?id=<companyId>
+ * Returns full company details by ID (admin only)
+ */
+export async function GET(request: Request) {
   try {
-    const { companyId } = await request.json();
+    const { searchParams } = new URL(request.url);
+    const companyId = searchParams.get("id");
 
     if (!companyId) {
       return NextResponse.json(
@@ -13,10 +18,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const companyRef = doc(adminDb, "companies", companyId);
+    const companyRef = doc(db, "companies", companyId);
     const companySnap = await getDoc(companyRef);
 
-    if (!companySnap.exists) {
+    if (!companySnap.exists()) {
       return NextResponse.json(
         { success: false, error: "Company not found" },
         { status: 404 }
@@ -24,10 +29,10 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { success: true, company: companySnap.data() },
+      { success: true, data: companySnap.data() },
       { status: 200 }
     );
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error fetching company details:", error);
     return NextResponse.json(
       { success: false, error: "Internal server error" },

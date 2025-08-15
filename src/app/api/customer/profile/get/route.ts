@@ -1,25 +1,27 @@
 import { NextResponse } from "next/server";
-import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
+import { db } from "@/lib/firebaseAdmin";
 import { doc, getDoc } from "firebase-admin/firestore";
 
-export async function POST(request: Request) {
+/**
+ * GET /api/customer/profile/get?id=<userId>
+ * Retrieves customer profile details
+ */
+export async function GET(request: Request) {
   try {
-    const { uid } = await request.json();
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get("id");
 
-    if (!uid) {
+    if (!userId) {
       return NextResponse.json(
-        { success: false, error: "Missing user ID" },
+        { success: false, error: "Missing userId" },
         { status: 400 }
       );
     }
 
-    // Optional: verify the UID is a valid Firebase Auth user
-    await adminAuth.getUser(uid);
-
-    const userRef = doc(adminDb, "users", uid);
+    const userRef = doc(db, "users", userId);
     const userSnap = await getDoc(userRef);
 
-    if (!userSnap.exists) {
+    if (!userSnap.exists()) {
       return NextResponse.json(
         { success: false, error: "User not found" },
         { status: 404 }
@@ -27,11 +29,11 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { success: true, profile: userSnap.data() },
+      { success: true, data: userSnap.data() },
       { status: 200 }
     );
-  } catch (error: any) {
-    console.error("Error fetching user profile:", error);
+  } catch (error) {
+    console.error("Error fetching profile:", error);
     return NextResponse.json(
       { success: false, error: "Internal server error" },
       { status: 500 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseAdmin"; // Corrected to match actual file name
+import { db } from "@/lib/firebaseAdmin"; // Correct casing for import
 import { doc, getDoc } from "firebase/firestore";
 
 /**
@@ -17,6 +17,7 @@ export async function POST(request: Request) {
       );
     }
 
+    // Reference the package in Firestore
     const packageRef = doc(db, "packages", packageId);
     const packageSnap = await getDoc(packageRef);
 
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
 
     const packageData = packageSnap.data();
 
-    // Optional: add extra validation rules here
+    // Additional validation: check if package is active
     if (packageData.status !== "active") {
       return NextResponse.json(
         { success: false, error: "Package is not available" },
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
       );
     }
 
+    // Return package data if valid
     return NextResponse.json(
       { success: true, package: packageData },
       { status: 200 }

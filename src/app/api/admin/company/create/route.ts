@@ -1,40 +1,59 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseAdmin";
-import { getAuth } from "firebase-admin/auth";
-import { doc, setDoc, serverTimestamp } from "firebase-admin/firestore";
+import { adminDb, adminAuth } from "@/lib/firebaseAdmin"; // Correct import
 
-export async function POST(req: Request) {
+/**
+ * POST /api/admin/company/create
+ * Creates a new company in Firestore.
+ * Requires the user to be authenticated as an admin.
+ */
+export async function POST(request: Request) {
   try {
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader) {
-      return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 });
+    const { name, details, authToken } = await request.json();
+
+    if (!name || !authToken) {
+      return NextResponse.json(
+        { success: false, error: "Missing required parameters" },
+        { status: 400 }
+      );
     }
 
-    const idToken = authHeader.replace("Bearer ", "").trim();
-    const decodedToken = await getAuth().verifyIdToken(idToken);
-
-    if (!decodedToken.admin) {
-      return NextResponse.json({ error: "Forbidden: Admins only" }, { status: 403 });
+    // Verify Firebase ID token
+    let decodedToken;
+    try {
+      decodedToken = await adminAuth.verifyIdToken(authToken);
+    } catch (error) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 }
+      );
     }
 
-    const { companyId, name, address, phone, email } = await req.json();
-
-    if (!companyId || !name || !address || !phone || !email) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    // Check admin role
+    if (decodedToken.role !== "admin") {
+      return NextResponse.json(
+        { success: false, error: "Forbidden" },
+        { status: 403 }
+      );
     }
 
-    await setDoc(doc(db, "companies", companyId), {
+    // Create new company document
+    const newCompanyRef = adminDb.collection("companies").doc();
+    await newCompanyRef.set({
       name,
-      address,
-      phone,
-      email,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      details: details || {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
 
-    return NextResponse.json({ success: true, message: "Company created successfully" }, { status: 201 });
+    return NextResponse.json(
+      { success: true, companyId: newCompanyRef.id },
+      { status: 201 }
+    );
   } catch (error: any) {
     console.error("Error creating company:", error);
-    return NextResponse.json({ error: "Internal server error", details: error.message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }

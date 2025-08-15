@@ -1,49 +1,52 @@
 import { NextResponse } from "next/server";
 import { getAuth } from "firebase/auth";
-import { db } from "@/lib/firebaseAdmin"; // fixed import
-import { doc, setDoc } from "firebase-admin/firestore";
+import { adminDb } from "@/lib/firebaseAdmin"; // Correct import
+import { doc, setDoc, serverTimestamp } from "firebase-admin/firestore";
 
-export async function POST(req: Request) {
+/**
+ * POST /api/customer/package/book
+ * Creates a booking for the authenticated user
+ */
+export async function POST(request: Request) {
   try {
-    // Ensure Firebase Auth is initialized in emulator mode
     const auth = getAuth();
+    const currentUser = auth.currentUser;
 
-    const user = auth.currentUser;
-    if (!user) {
+    if (!currentUser) {
       return NextResponse.json(
-        { error: "Unauthorized: No authenticated customer" },
+        { success: false, error: "Unauthorized" },
         { status: 401 }
       );
     }
 
-    const { packageId, customerData } = await req.json();
+    const { packageId, bookingDetails } = await request.json();
 
-    // Basic payload validation
-    if (!packageId || !customerData) {
+    if (!packageId || !bookingDetails) {
       return NextResponse.json(
-        { error: "Missing required fields: packageId or customerData" },
+        { success: false, error: "Missing required booking data" },
         { status: 400 }
       );
     }
 
-    // Create a booking doc in Firestore
-    const bookingRef = doc(db, "bookings", `${user.uid}_${packageId}`);
+    const bookingId = `${currentUser.uid}_${Date.now()}`;
+    const bookingRef = doc(adminDb, "bookings", bookingId);
 
     await setDoc(bookingRef, {
+      userId: currentUser.uid,
       packageId,
-      customerData,
+      bookingDetails,
       status: "pending",
-      createdAt: new Date().toISOString(),
+      createdAt: serverTimestamp(),
     });
 
     return NextResponse.json(
-      { message: "Booking created successfully" },
-      { status: 200 }
+      { success: true, bookingId },
+      { status: 201 }
     );
   } catch (error: any) {
     console.error("Error creating booking:", error);
     return NextResponse.json(
-      { error: "Internal server error", details: error.message },
+      { success: false, error: "Internal server error" },
       { status: 500 }
     );
   }

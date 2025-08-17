@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
 
 /**
- * POST /api/customer/booking/cancel
- * Cancels an existing booking for the authenticated customer
+ * POST /api/customer/bookings/cancel
+ * Allows a customer to cancel a booking
  */
 export async function POST(request: Request) {
   try {
@@ -19,47 +19,30 @@ export async function POST(request: Request) {
     const { bookingId } = await request.json();
 
     if (!bookingId) {
-      return NextResponse.json(
-        { success: false, error: "Missing bookingId" },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: "Missing bookingId" }, { status: 400 });
     }
 
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const bookingSnap = await bookingRef.get();
 
     if (!bookingSnap.exists) {
-      return NextResponse.json(
-        { success: false, error: "Booking not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: "Booking not found" }, { status: 404 });
     }
 
     const bookingData = bookingSnap.data();
 
-    // Ensure only the user who created the booking can cancel it
-    if (bookingData?.userId !== userId) {
-      return NextResponse.json(
-        { success: false, error: "Forbidden" },
-        { status: 403 }
-      );
+    if (bookingData?.customerId !== userId) {
+      return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
     }
 
-    // Update booking status to "cancelled"
-    await bookingRef.update({
-      status: "cancelled",
-      cancelledAt: new Date().toISOString(),
-    });
-
-    return NextResponse.json(
-      { success: true, message: "Booking cancelled successfully" },
-      { status: 200 }
+    await bookingRef.set(
+      { status: "cancelled", cancelledAt: new Date().toISOString() },
+      { merge: true }
     );
+
+    return NextResponse.json({ success: true, message: "Booking cancelled successfully" }, { status: 200 });
   } catch (error: any) {
     console.error("Error cancelling booking:", error);
-    return NextResponse.json(
-      { success: false, error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }

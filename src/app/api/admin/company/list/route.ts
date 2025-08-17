@@ -1,45 +1,35 @@
 import { NextResponse } from "next/server";
-import { adminDb, adminAuth } from "@/lib/firebaseAdmin"; // Correct import
+import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
 
 /**
  * GET /api/admin/company/list
- * Lists all companies in Firestore.
- * Requires the user to be authenticated as an admin.
+ * Returns a list of all companies.
+ * Requires admin privileges.
  */
 export async function GET(request: Request) {
   try {
+    // ✅ Verify auth & role
     const authHeader = request.headers.get("authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json(
-        { success: false, error: "Missing or invalid authorization header" },
-        { status: 401 }
-      );
-    }
-
-    const token = authHeader.split("Bearer ")[1];
-
-    // Verify Firebase ID token
-    let decodedToken;
-    try {
-      decodedToken = await adminAuth.verifyIdToken(token);
-    } catch (error) {
+    if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }
       );
     }
 
-    // Check admin role
-    if (decodedToken.role !== "admin") {
+    const idToken = authHeader.split("Bearer ")[1];
+    const decoded = await adminAuth.verifyIdToken(idToken);
+
+    if (decoded.role !== "admin") {
       return NextResponse.json(
         { success: false, error: "Forbidden" },
         { status: 403 }
       );
     }
 
-    // Query all companies
-    const companiesSnapshot = await adminDb.collection("companies").get();
-    const companies = companiesSnapshot.docs.map((doc) => ({
+    // ✅ Fetch companies
+    const companiesSnap = await adminDb.collection("companies").get();
+    const companies = companiesSnap.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));

@@ -3,7 +3,7 @@ import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
 
 /**
  * POST /api/customer/notifications/mark-read
- * Marks a notification as read for the authenticated customer
+ * Marks a notification as read
  */
 export async function POST(request: Request) {
   try {
@@ -22,11 +22,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Missing notificationId" }, { status: 400 });
     }
 
-    const notifRef = adminDb
-      .collection("users")
-      .doc(userId)
-      .collection("notifications")
-      .doc(notificationId);
+    const notifRef = adminDb.collection("notifications").doc(notificationId);
+    const notifSnap = await notifRef.get();
+
+    if (!notifSnap.exists) {
+      return NextResponse.json({ success: false, error: "Notification not found" }, { status: 404 });
+    }
+
+    const notifData = notifSnap.data();
+    if (notifData?.userId !== userId) {
+      return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+    }
 
     await notifRef.set({ read: true, readAt: new Date().toISOString() }, { merge: true });
 

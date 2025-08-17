@@ -1,31 +1,38 @@
 import { NextResponse } from "next/server";
-import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
+import { adminDb } from "@/lib/firebaseAdmin";
 
 /**
- * GET /api/customer/profile/get
- * Fetches the profile for the authenticated customer
+ * GET /api/customer/profile/get?uid=USER_ID
+ * Fetches customer profile
  */
 export async function GET(request: Request) {
   try {
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    const { searchParams } = new URL(request.url);
+    const uid = searchParams.get("uid");
+
+    if (!uid) {
+      return NextResponse.json(
+        { success: false, error: "Missing UID" },
+        { status: 400 }
+      );
     }
 
-    const idToken = authHeader.split("Bearer ")[1];
-    const decoded = await adminAuth.verifyIdToken(idToken);
-    const userId = decoded.uid;
+    const docRef = adminDb.collection("customers").doc(uid);
+    const docSnap = await docRef.get();
 
-    const userRef = adminDb.collection("users").doc(userId);
-    const userSnap = await userRef.get();
-
-    if (!userSnap.exists) {
-      return NextResponse.json({ success: false, error: "User profile not found" }, { status: 404 });
+    if (!docSnap.exists) {
+      return NextResponse.json(
+        { success: false, error: "Customer not found" },
+        { status: 404 }
+      );
     }
 
-    return NextResponse.json({ success: true, profile: userSnap.data() }, { status: 200 });
-  } catch (error: any) {
-    console.error("Error fetching profile:", error);
-    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ success: true, profile: docSnap.data() });
+  } catch (err: any) {
+    console.error("Error fetching profile:", err);
+    return NextResponse.json(
+      { success: false, error: err.message || "Internal server error" },
+      { status: 500 }
+    );
   }
 }

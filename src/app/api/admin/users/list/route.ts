@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
-import { adminAuth } from "@/lib/firebaseAdmin";
+import { adminDb } from "@/lib/firebaseAdmin";
 
 /**
  * GET /api/admin/users/list
- * Lists all users (paginated).
+ * Admin can fetch all users from Firestore
  */
 export async function GET() {
   try {
-    const listUsers = await adminAuth.listUsers(1000);
+    const usersRef = adminDb.collection("users");
+    const snapshot = await usersRef.get();
 
-    const users = listUsers.users.map((user) => ({
-      uid: user.uid,
-      email: user.email,
-      role: user.customClaims?.role || "customer",
+    const users = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
     }));
 
     return NextResponse.json({ success: true, users }, { status: 200 });

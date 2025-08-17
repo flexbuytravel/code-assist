@@ -3,20 +3,11 @@ import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
 
 /**
  * POST /api/admin/company/create
- * Creates a new company in Firestore.
+ * Creates a new company document.
  * Requires admin privileges.
  */
 export async function POST(request: Request) {
   try {
-    const { companyId, data } = await request.json();
-
-    if (!companyId || !data) {
-      return NextResponse.json(
-        { success: false, error: "Missing companyId or data" },
-        { status: 400 }
-      );
-    }
-
     // ✅ Verify auth & role
     const authHeader = request.headers.get("authorization");
     if (!authHeader?.startsWith("Bearer ")) {
@@ -36,26 +27,31 @@ export async function POST(request: Request) {
       );
     }
 
-    // ✅ Ensure company doesn’t already exist
-    const companyRef = adminDb.collection("companies").doc(companyId);
-    const companySnap = await companyRef.get();
+    // ✅ Parse body
+    const body = await request.json();
+    const { name, address, contactEmail } = body;
 
-    if (companySnap.exists) {
+    if (!name || !contactEmail) {
       return NextResponse.json(
-        { success: false, error: "Company already exists" },
-        { status: 409 }
+        { success: false, error: "Missing required fields" },
+        { status: 400 }
       );
     }
 
-    // ✅ Create company
-    await companyRef.set({
-      ...data,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
+    // ✅ Create company in Firestore
+    const newCompanyRef = adminDb.collection("companies").doc();
+    const companyData = {
+      name,
+      address: address || "",
+      contactEmail,
+      createdAt: new Date(),
+      createdBy: decoded.uid,
+    };
+
+    await newCompanyRef.set(companyData);
 
     return NextResponse.json(
-      { success: true, message: "Company created successfully" },
+      { success: true, companyId: newCompanyRef.id, company: companyData },
       { status: 201 }
     );
   } catch (error: any) {

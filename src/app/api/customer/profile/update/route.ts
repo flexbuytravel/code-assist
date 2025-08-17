@@ -3,32 +3,25 @@ import { adminDb } from "@/lib/firebaseAdmin";
 
 /**
  * PATCH /api/customer/profile/update
- * Updates customer profile fields
+ * Update a customer's profile
  */
 export async function PATCH(request: Request) {
   try {
-    const { uid, ...updateData } = await request.json();
+    const { customerId, updates } = await request.json();
 
-    if (!uid) {
+    if (!customerId || !updates) {
       return NextResponse.json(
-        { success: false, error: "Missing UID" },
+        { success: false, error: "Missing customerId or updates" },
         { status: 400 }
       );
     }
 
-    if (Object.keys(updateData).length === 0) {
-      return NextResponse.json(
-        { success: false, error: "No update fields provided" },
-        { status: 400 }
-      );
-    }
-
-    const docRef = adminDb.collection("customers").doc(uid);
-    await docRef.set(updateData, { merge: true });
+    const docRef = adminDb.collection("customers").doc(customerId);
+    await docRef.set(updates, { merge: true });
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
-    console.error("Error updating profile:", err);
+    console.error("Error updating customer profile:", err);
     return NextResponse.json(
       { success: false, error: err.message || "Internal server error" },
       { status: 500 }

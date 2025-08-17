@@ -1,67 +1,74 @@
 import { NextResponse } from "next/server";
+import { adminDb } from "@/lib/firebaseAdmin";
 import Stripe from "stripe";
-import { adminDb } from "@/lib/firebaseAdmin"; // Correct import
-import { doc, updateDoc } from "firebase-admin/firestore";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: "2024-06-20",
+  apiVersion: "2023-10-16",
 });
 
+/**
+ * POST /api/customer/package/payment-success
+ * Confirms a successful payment and updates Firestore records.
+ * This can be triggered by a frontend call after Stripe confirmation,
+ * or ideally, handled by a Stripe webhook for security.
+ */
 export async function POST(request: Request) {
   try {
-    const sig = request.headers.get("stripe-signature");
+    const { paymentIntentId } = await request.json();
 
-    if (!sig) {
+    if (!paymentIntentId) {
       return NextResponse.json(
-        { success: false, error: "Missing Stripe signature" },
+        { success: false, error: "Missing paymentIntentId" },
         { status: 400 }
       );
     }
 
-    const body = await request.text();
+    // Fetch payment intent from Stripe
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
 
-    let event: Stripe.Event;
-    try {
-      event = stripe.webhooks.constructEvent(
-        body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET as string
-      );
-    } catch (err: any) {
-      console.error("⚠️  Webhook signature verification failed:", err.message);
+    if (paymentIntent.status !== "succeeded") {
       return NextResponse.json(
-        { success: false, error: "Invalid Stripe signature" },
+        { success: false, error: "Payment not successful" },
         { status: 400 }
       );
     }
 
-    if (event.type === "payment_intent.succeeded") {
-      const paymentIntent = event.data.object as Stripe.PaymentIntent;
-      const packageId = paymentIntent.metadata.packageId;
-
-      if (!packageId) {
-        return NextResponse.json(
-          { success: false, error: "Missing packageId in metadata" },
-          { status: 400 }
-        );
-      }
-
-      // Update package booking as paid
-      const packageRef = doc(adminDb, "packages", packageId);
-      await updateDoc(packageRef, {
-        paymentStatus: "paid",
-        updatedAt: new Date(),
-      });
-
-      return NextResponse.json({ success: true }, { status: 200 });
+    const { userId, packageId } = paymentIntent.metadata || {};
+    if (!userId || !packageId) {
+      return NextResponse.json(
+        { success: false, error: "Missing metadata on payment" },
+        { status: 500 }
+      );
     }
+
+    // Update Firestore payment record
+    const paymentRef = adminDb.collection("payments").doc(paymentIntentId);
+    await paymentRef.update({
+      status: "succeeded",
+      confirmedAt: new Date().toISOString(),
+    });
+
+    // Optionally mark booking as confirmed
+    await adminDb
+      .collection("bookings")
+      .doc(`${userId}_${packageId}`)
+      .set(
+        {
+          userId,
+          packageId,
+          paymentId: paymentIntentId,
+          status: "confirmed",
+          confirmedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
 
     return NextResponse.json(
-      { success: false, error: "Unhandled event type" },
-      { status: 400 }
+      { success: true, message: "Payment confirmed and booking recorded" },
+      { status: 200 }
     );
   } catch (error: any) {
-    console.error("Error handling payment success webhook:", error);
+    console.error("Error confirming payment:", error);
     return NextResponse.json(
       { success: false, error: "Internal server error" },
       { status: 500 }

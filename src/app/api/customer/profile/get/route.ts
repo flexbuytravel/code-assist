@@ -1,42 +1,31 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseAdmin";
-import { doc, getDoc } from "firebase-admin/firestore";
+import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
 
 /**
- * GET /api/customer/profile/get?id=<userId>
- * Retrieves customer profile details
+ * GET /api/customer/profile/get
+ * Fetches the profile for the authenticated customer
  */
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get("id");
-
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: "Missing userId" },
-        { status: 400 }
-      );
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    const userRef = doc(db, "users", userId);
-    const userSnap = await getDoc(userRef);
+    const idToken = authHeader.split("Bearer ")[1];
+    const decoded = await adminAuth.verifyIdToken(idToken);
+    const userId = decoded.uid;
 
-    if (!userSnap.exists()) {
-      return NextResponse.json(
-        { success: false, error: "User not found" },
-        { status: 404 }
-      );
+    const userRef = adminDb.collection("users").doc(userId);
+    const userSnap = await userRef.get();
+
+    if (!userSnap.exists) {
+      return NextResponse.json({ success: false, error: "User profile not found" }, { status: 404 });
     }
 
-    return NextResponse.json(
-      { success: true, data: userSnap.data() },
-      { status: 200 }
-    );
-  } catch (error) {
+    return NextResponse.json({ success: true, profile: userSnap.data() }, { status: 200 });
+  } catch (error: any) {
     console.error("Error fetching profile:", error);
-    return NextResponse.json(
-      { success: false, error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }

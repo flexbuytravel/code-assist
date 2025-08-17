@@ -1,34 +1,46 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseAdmin";
-import { doc, updateDoc } from "firebase-admin/firestore";
+import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
 
 /**
  * POST /api/customer/profile/update
- * Updates customer profile details
+ * Allows a logged-in customer to update their profile information
  */
 export async function POST(request: Request) {
   try {
-    const { userId, updates } = await request.json();
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
 
-    if (!userId || !updates || typeof updates !== "object") {
+    const idToken = authHeader.split("Bearer ")[1];
+    const decoded = await adminAuth.verifyIdToken(idToken);
+    const userId = decoded.uid;
+
+    const body = await request.json();
+    const { name, phone, address } = body;
+
+    if (!name && !phone && !address) {
       return NextResponse.json(
-        { success: false, error: "Missing or invalid parameters" },
+        { success: false, error: "No fields provided for update" },
         { status: 400 }
       );
     }
 
-    const userRef = doc(db, "users", userId);
-    await updateDoc(userRef, updates);
+    const userRef = adminDb.collection("users").doc(userId);
 
-    return NextResponse.json(
-      { success: true, message: "Profile updated successfully" },
-      { status: 200 }
+    await userRef.set(
+      {
+        ...(name && { name }),
+        ...(phone && { phone }),
+        ...(address && { address }),
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
     );
-  } catch (error) {
+
+    return NextResponse.json({ success: true, message: "Profile updated successfully" }, { status: 200 });
+  } catch (error: any) {
     console.error("Error updating profile:", error);
-    return NextResponse.json(
-      { success: false, error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }

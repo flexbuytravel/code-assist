@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
 
 /**
- * DELETE /api/customer/booking/cancel
- * Cancels an existing booking belonging to the authenticated customer
+ * POST /api/customer/booking/cancel
+ * Cancels an existing booking for the authenticated customer
  */
-export async function DELETE(request: Request) {
+export async function POST(request: Request) {
   try {
     const authHeader = request.headers.get("authorization");
     if (!authHeader?.startsWith("Bearer ")) {
@@ -36,20 +36,25 @@ export async function DELETE(request: Request) {
     }
 
     const bookingData = bookingSnap.data();
+
+    // Ensure only the user who created the booking can cancel it
     if (bookingData?.userId !== userId) {
       return NextResponse.json(
-        { success: false, error: "Forbidden: cannot cancel someone else’s booking" },
+        { success: false, error: "Forbidden" },
         { status: 403 }
       );
     }
 
-    // Instead of hard delete, we soft-cancel by updating status
+    // Update booking status to "cancelled"
     await bookingRef.update({
       status: "cancelled",
       cancelledAt: new Date().toISOString(),
     });
 
-    return NextResponse.json({ success: true, message: "Booking cancelled" }, { status: 200 });
+    return NextResponse.json(
+      { success: true, message: "Booking cancelled successfully" },
+      { status: 200 }
+    );
   } catch (error: any) {
     console.error("Error cancelling booking:", error);
     return NextResponse.json(

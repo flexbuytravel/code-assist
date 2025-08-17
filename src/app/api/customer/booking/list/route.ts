@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
 
 /**
- * GET /api/customer/booking/list
- * Returns all bookings for the authenticated customer
+ * GET /api/customer/bookings/list
+ * Lists all bookings for the authenticated customer
  */
 export async function GET(request: Request) {
   try {
@@ -16,14 +16,14 @@ export async function GET(request: Request) {
     const decoded = await adminAuth.verifyIdToken(idToken);
     const userId = decoded.uid;
 
-    // Query Firestore for bookings belonging to this user
-    const bookingsQuery = await adminDb
+    const bookingsRef = adminDb
       .collection("bookings")
-      .where("userId", "==", userId)
-      .orderBy("createdAt", "desc")
-      .get();
+      .where("customerId", "==", userId)
+      .orderBy("createdAt", "desc");
 
-    const bookings = bookingsQuery.docs.map((doc) => ({
+    const snapshot = await bookingsRef.get();
+
+    const bookings = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
     }));
@@ -31,9 +31,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: true, bookings }, { status: 200 });
   } catch (error: any) {
     console.error("Error listing bookings:", error);
-    return NextResponse.json(
-      { success: false, error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }

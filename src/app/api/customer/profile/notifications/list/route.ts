@@ -3,7 +3,7 @@ import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
 
 /**
  * GET /api/customer/notifications/list
- * Lists all notifications for the authenticated customer
+ * Fetches all notifications for the authenticated customer
  */
 export async function GET(request: Request) {
   try {
@@ -16,22 +16,20 @@ export async function GET(request: Request) {
     const decoded = await adminAuth.verifyIdToken(idToken);
     const userId = decoded.uid;
 
-    const notificationsRef = adminDb
-      .collection("users")
-      .doc(userId)
+    const notificationsSnap = await adminDb
       .collection("notifications")
-      .orderBy("createdAt", "desc");
+      .where("userId", "==", userId)
+      .orderBy("createdAt", "desc")
+      .get();
 
-    const snapshot = await notificationsRef.get();
-
-    const notifications = snapshot.docs.map(doc => ({
+    const notifications = notificationsSnap.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
 
     return NextResponse.json({ success: true, notifications }, { status: 200 });
   } catch (error: any) {
-    console.error("Error listing notifications:", error);
+    console.error("Error fetching notifications:", error);
     return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }

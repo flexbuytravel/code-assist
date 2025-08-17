@@ -1,48 +1,54 @@
 import { NextResponse } from "next/server";
-import { adminDb, adminAuth } from "@/lib/firebaseAdmin"; // Corrected import
-import { getAuth } from "firebase-admin/auth";
+import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
 
 /**
  * PATCH /api/admin/company/update
- * Updates company details in Firestore.
- * Requires the user to be authenticated as an admin.
+ * Updates an existing company’s details.
+ * Requires admin privileges.
  */
 export async function PATCH(request: Request) {
   try {
-    const { companyId, updates, authToken } = await request.json();
+    const { companyId, updates } = await request.json();
 
-    if (!companyId || !updates || !authToken) {
+    if (!companyId || !updates) {
       return NextResponse.json(
-        { success: false, error: "Missing required parameters" },
+        { success: false, error: "Missing companyId or updates" },
         { status: 400 }
       );
     }
 
-    // Verify the Firebase ID token
-    let decodedToken;
-    try {
-      decodedToken = await adminAuth.verifyIdToken(authToken);
-    } catch (error) {
+    // ✅ Verify auth & role
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }
       );
     }
 
-    // Check if the user has admin role
-    if (decodedToken.role !== "admin") {
+    const idToken = authHeader.split("Bearer ")[1];
+    const decoded = await adminAuth.verifyIdToken(idToken);
+
+    if (decoded.role !== "admin") {
       return NextResponse.json(
         { success: false, error: "Forbidden" },
         { status: 403 }
       );
     }
 
-    // Update company document in Firestore
+    // ✅ Get company ref
     const companyRef = adminDb.collection("companies").doc(companyId);
-    await companyRef.update({
-      ...updates,
-      updatedAt: new Date().toISOString(),
-    });
+    const companySnap = await companyRef.get();
+
+    if (!companySnap.exists) {
+      return NextResponse.json(
+        { success: false, error: "Company not found" },
+        { status: 404 }
+      );
+    }
+
+    // ✅ Update company
+    await companyRef.update(updates);
 
     return NextResponse.json(
       { success: true, message: "Company updated successfully" },

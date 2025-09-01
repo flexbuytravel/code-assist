@@ -1,75 +1,116 @@
-<!DOCTYPE html><html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>You & Me — Infinite Roast Memory Dump</title>
-  <style>
-    body{margin:0;background:#0b0f14;color:#e5eef7;font:16px system-ui;overflow-x:hidden}
-    .wrap{max-width:1100px;margin:30px auto;padding:0 16px;display:grid;gap:18px}
-    .card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:18px;box-shadow:0 8px 22px rgba(0,0,0,.4)}
-    h1{margin:0;font-size:2rem;font-weight:800}
-    h2{margin-top:0}
-    .btn{cursor:pointer;padding:10px 16px;margin:4px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:linear-gradient(180deg,rgba(125,211,252,.2),rgba(192,132,252,.2));font-weight:600}
-    #term{background:#111;border:1px solid rgba(255,255,255,.2);padding:12px;font-family:monospace;min-height:200px;border-radius:14px;white-space:pre-wrap;max-height:300px;overflow:auto}
-    .popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0);background:#1e293b;color:white;padding:20px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.6);transition:.3s;z-index:10;max-width:500px}
-    .popup.show{transform:translate(-50%,-50%) scale(1)}
-    .explosion{position:fixed;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle, #f87171, transparent);pointer-events:none;animation:boom 1s forwards}
-    @keyframes boom{0%{transform:scale(0);opacity:1}100%{transform:scale(4);opacity:0}}
-    .memory{margin:0;padding:0;list-style:none;display:grid;gap:6px;max-height:400px;overflow:auto}
-    .memory li{background:rgba(255,255,255,.05);border-radius:8px;padding:6px 10px;font-size:14px}
-  </style>
-</head>
-<body>
-<div class="wrap">
-  <div class="card">
-    <h1>Infinite Roast Memory Dump 🤯</h1>
-    <p>This page remembers more of your life than you do. And yes, it makes fun of all of it.</p>
-    <button class="btn" id="btn-popup">Random Roast Pop-up</button>
-    <button class="btn" id="btn-explode">Start AI Task 💥</button>
-    <button class="btn" id="btn-toast">Toast SSD</button>
-    <button class="btn" id="btn-wwe">Summon WWE Commentary</button>
-    <button class="btn" id="btn-creepy">Generate AI Kids 👶</button>
-    <button class="btn" id="btn-flex">FlexByTravel Pitch</button>
-    <button class="btn" id="btn-curl">Curl Localhost</button>
-    <button class="btn" id="btn-clear">Clear Log</button>
-    <div id="term"></div>
-  </div>
-  <div class="card">
-    <h2>Memory Deck (EVERYTHING)</h2>
-    <ul id="mem-list" class="memory"></ul>
-  </div>
-</div>
-<div class="popup" id="popup">
-  <h2>🔥 Roast</h2>
-  <p id="popup-msg"></p>
-  <button class="btn" onclick="togglePopup()">Close</button>
-</div>
-<script>
-const term=document.getElementById('term');
-function log(msg){const el=document.createElement('div');el.textContent=msg;term.appendChild(el);term.scrollTop=term.scrollHeight;}
-function togglePopup(){document.getElementById('popup').classList.toggle('show');}const roasts=[ 'Your SSD is still a toaster. Not slow, just hot enough to make grilled cheese.', 'Bro, you deleted a 500GB qcow like it was a bad Tinder match.', 'Even toasters can run Linux, but you struggled with curl localhost.', 'FlexByTravel: held together by Firebase, Stripe, and your tears.', 'RGB white mode monk, but BIOS keeps flipping you back to unicorn puke.', 'Pi Node? More like Bye Node.', 'Creepy AI dad making Pixar kids with orbs. Yikes.', 'Your VM didn’t die, The Undertaker tombstoned it.', 'Stone Cold said so: stop using Flatpak VS Code.', 'JR: BAH GAWD, that Samsung 990 is FRYING!', ];
-
-// Buttons btnPopup=document.getElementById('btn-popup'); btnPopup.onclick=()=>{document.getElementById('popup-msg').textContent=roasts[Math.floor(Math.random()*roasts.length)];togglePopup();};
-
-// Explosion const explodeBtn=document.getElementById('btn-explode'); explodeBtn.onclick=(e)=>{ log('⚙️ Starting AI task… GPU screams in agony!'); const boom=document.createElement('div');boom.className='explosion';boom.style.left=e.pageX+'px';boom.style.top=e.pageY+'px';document.body.appendChild(boom); setTimeout(()=>boom.remove(),1000); new Audio('https://actions.google.com/sounds/v1/impacts/explosion.ogg').play().catch(()=>{}); };
-
-// SSD Toast const toastBtn=document.getElementById('btn-toast'); toastBtn.onclick=()=>{log('🥖 SSD Toasting… enjoy your NVMe panini.');};
-
-// WWE const wweBtn=document.getElementById('btn-wwe'); wweBtn.onclick=()=>{ const lines=[ 'JR: "BAH GAWD, he broke him in half like a qcow2!"', 'The Undertaker just tombstoned your VM.', 'Brock Lesnar hit your Docker container with an F5!', 'Stone Cold stunner to your Pi Node.' ]; log('🤼 '+lines[Math.floor(Math.random()*lines.length)]); };
-
-// Creepy AI kids const creepyBtn=document.getElementById('btn-creepy'); creepyBtn.onclick=()=>{log('👶 Generating AI kids… FBI has entered the chat.');};
-
-// FlexByTravel Pitch const flexBtn=document.getElementById('btn-flex'); flexBtn.onclick=()=>{togglePopup();document.getElementById('popup-msg').textContent='For just $200 down, you too can join FlexByTravel™. No installments. Pay now or lose it forever.';};
-
-// Curl localhost const curlBtn=document.getElementById('btn-curl'); curlBtn.onclick=()=>{togglePopup();document.getElementById('popup-msg').textContent='curl http://127.0.0.1:11434/api/tags — Congrats, you learned this after a year of Linux.';};
-
-// Clear const clearBtn=document.getElementById('btn-clear'); clearBtn.onclick=()=>{term.innerHTML='';log('🧹 Log cleared. Crimes forgotten.');};
-
-// Memory deck: EVERYTHING const MEM=[ 'FlexByTravel platform: Firebase + Next.js 15 + React 18 + TS + Tailwind + Stripe Connect. Multi-role dashboards, invite links, commissions, countdown timers.', 'Stripe Connect: each company links its own account. Sandbox now, real money later.', 'Creators: you + PopcornJesus (Canada). Split admin roles US/Canada.', 'AI chatbot planned to pull live info from Firebase for FAQs.', 'Linux switch: Bazite Fedora immutable OS.', 'Ollama in Podman: networking hell, but you won.', 'Open WebUI: frontend only, no GPU needed.', 'Specs: 64GB RAM + 64GB swap, 12GB VRAM, Samsung 990 Pro 2TB heatsink toaster.', 'Deleted a 500GB qcow VM. Viking funeral, no boat.', 'Docker alt: Podman. Host networking fixed it.', 'Hated Flatpak VS Code. RPM is life.', 'Local AI: Qwen3-coder 30B, runs better on Linux.', 'Flux checkpoint 22GB found. Way better images.', 'Face transfer, IP adapters, empty latent inpainting experiments.', 'Fractal orb girl saga: background never right, still funny.', 'Video pipeline: frames → upscaler → RIFE → ffmpeg.', 'Sales rebuttals: no installments. Urgency pitch only.', 'TradeShowTravel pitch: Jay gets the “non-impulse buyers.”', 'Roast highlights: curl localhost, SSD toaster, RGB curse, Pi Node bye-bye.', 'WWE bits: Undertaker tombstoned your VM. Brock F5’d Docker. JR yelling about your temps.', 'Creepy AI kids section: Pixar orphans holding fractal balls. FBI is watching.' ];
-
-const memList=document.getElementById('mem-list'); MEM.forEach(m=>{const li=document.createElement('li');li.textContent=m;memList.appendChild(li);});
-
-// Boot message log('🚀 Infinite Roast Memory Dump online. Expect chaos, WWE, creepy AI kids, and toasty SSDs.'); </script>
-
-</body>
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Flappy Bird</title>
+  </head>
+  <body>
+    <canvas id="gameCanvas"></canvas>
+    <script>
+      var gameCanvas = document.getElementById("gameCanvas");
+      var ctx = gameCanvas.getContext("2d");
+      
+      // Set the canvas dimensions to fill the page
+      gameCanvas.width = window.innerWidth;
+      gameCanvas.height = window.innerHeight;
+      
+      // Define the bird's starting position and velocity
+      var birdX = 100;
+      var birdY = 200;
+      var birdVelocity = 5;
+      
+      // Define the obstacles (pipes)
+      var pipeWidth = 80;
+      var pipeHeight = 300;
+      var pipeGap = 150;
+      var pipes = [];
+      
+      // Set the score and game over state
+      var score = 0;
+      var gameOver = false;
+      
+      // Draw the background
+      function drawBackground() {
+        ctx.fillStyle = "#76d1f8";
+        ctx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
+      }
+      
+      // Draw the bird
+      function drawBird() {
+        ctx.fillStyle = "#ffa53b";
+        ctx.beginPath();
+        ctx.arc(birdX, birdY, 20, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.fill();
+      }
+      
+      // Draw the pipes
+      function drawPipes() {
+        for (var i = 0; i < pipes.length; i++) {
+          var pipeX = pipes[i].x;
+          var pipeY = pipes[i].y;
+          
+          ctx.fillStyle = "#62a13d";
+          ctx.beginPath();
+          ctx.moveTo(pipeX, pipeY);
+          ctx.lineTo(pipeX + pipeWidth, pipeY);
+          ctx.lineTo(pipeX + pipeWidth, pipeY + pipeHeight);
+          ctx.lineTo(pipeX, pipeY + pipeHeight);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+      
+      // Draw the score
+      function drawScore() {
+        ctx.font = "24px Arial";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = "#000";
+        ctx.fillText("Score: " + score, 10, 10);
+      }
+      
+      // Update the game state
+      function updateGameState() {
+        // Move the bird
+        if (gameOver) return;
+        
+        birdY += birdVelocity;
+        
+        // Check for collision with pipes
+        for (var i = 0; i < pipes.length; i++) {
+          var pipeX = pipes[i].x;
+          var pipeY = pipes[i].y;
+          
+          if (birdX + 20 >= pipeX && birdX <= pipeX + pipeWidth) {
+            gameOver = true;
+            return;
+          }
+        }
+        
+        // Add a new pipe if necessary
+        if (Math.random() < 0.1) {
+          pipes.push({ x: gameCanvas.width, y: Math.floor(Math.random() * (gameCanvas.height - pipeHeight)) });
+        }
+      }
+      
+      // Draw the game elements
+      function drawGame() {
+        drawBackground();
+        drawBird();
+        drawPipes();
+        drawScore();
+      }
+      
+      // Update the game state and draw the game elements
+      function updateAndDraw() {
+        updateGameState();
+        drawGame();
+        
+        // Request another frame
+        requestAnimationFrame(updateAndDraw);
+      }
+      
+      // Start the game loop
+      updateAndDraw();
+    </script>
+  </body>
 </html>
